@@ -409,10 +409,19 @@ function el(tag, attrs, ...kids){
 
 function render(){
   const app = document.getElementById("app");
+  const renderKey = state.screen + (state.screen === "rate" ? ":" + state.idx : "");
+  const prevKey = app.dataset.renderKey;
+  const scrollY = window.scrollY;
   app.innerHTML = "";
   if (state.screen === "landing") app.appendChild(renderLanding());
   else if (state.screen === "rate") app.appendChild(renderRate());
   else if (state.screen === "done") app.appendChild(renderDone());
+  app.dataset.renderKey = renderKey;
+  // Rebuilding the DOM resets scroll to the top; restore it when we're just
+  // re-rendering the same fruit/screen (e.g. tapping a grade choice), but
+  // jump to the top when we've actually moved to a new fruit or screen.
+  if (prevKey === renderKey) window.scrollTo(0, scrollY);
+  else window.scrollTo(0, 0);
 }
 
 function renderLanding(){

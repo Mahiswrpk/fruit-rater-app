@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Fruit Grader</title>
+<title>Blind Fruit Grader</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root{
@@ -227,7 +227,7 @@ const CONFIG = {
           <span>Rate {{ SPOT_INITIAL }} fruit-days from a shared set the same ones every spot-check rater sees, used to measure agreement between raters. You can optionally add more afterward.</span>
         </button>
       </div>
-      <button class="primary" :disabled="!canStart" @click="startSession">Start rating</button>
+      <button class="primary" :disabled="!canStart || startingSession" @click="startSession">{{ startingSession ? "Starting…" : "Start rating" }}</button>
       <div class="save-note">{{ storageNote }}</div>
     </div>
     <details class="rubric">
@@ -322,16 +322,18 @@ const CONFIG = {
 
   <div class="card finish stack" v-else-if="screen==='spotOffer'">
     <h2>Keep going?</h2>
-    <p class="kicker">You've rated {{ queue.length }} fruit-days on the spot-check set. If you have a few more minutes, we can add {{ Math.min(SPOT_EXTRA, spotPool.length - queue.length) }} more — every extra rating helps us measure agreement between raters.</p>
+    <p class="kicker" v-if="remainingSpotCount">You've rated {{ queue.length }} fruit-days on the spot-check set. If you have a few more minutes, we can add {{ remainingSpotCount }} more — every extra rating helps us measure agreement between raters.</p>
+    <p class="kicker" v-else>You've rated {{ queue.length }} fruit-days on the spot-check set — there's nothing further left to assign right now.</p>
     <div class="row" style="justify-content:center">
       <button class="ghost" @click="declineSpotOffer">No, I'm done</button>
-      <button class="primary" @click="acceptSpotOffer">Yes, add {{ Math.min(SPOT_EXTRA, spotPool.length - queue.length) }} more</button>
+      <button class="primary" v-if="remainingSpotCount" @click="acceptSpotOffer">Yes, add {{ remainingSpotCount }} more</button>
     </div>
   </div>
 
   <div class="card finish stack" v-else-if="screen==='done'">
     <h2>All done</h2>
-    <p class="kicker">Thank you, {{ rater.trim() }}. You rated {{ queue.length }} fruit-days on the {{ track==='full' ? 'full' : 'spot-check' }} track.</p>
+    <p class="kicker" v-if="queue.length">Thank you, {{ rater.trim() }}. You rated {{ queue.length }} fruit-days on the {{ track==='full' ? 'full' : 'spot-check' }} track.</p>
+    <p class="kicker" v-else>Thank you, {{ rater.trim() }} — every spot-check fruit-day already has enough independent ratings right now, so there's nothing left to assign you. Please check back later.</p>
     <p class="kicker" v-if="pendingCount">{{ pendingCount }} rating(s) haven't synced to the Sheet yet (offline or the connection dropped). Try "Retry sync" before you close this tab, or keep the downloaded CSV as a backup.</p>
     <p class="kicker" v-else-if="syncConfigured">All your ratings are synced to the results sheet.</p>
     <div class="row" style="justify-content:center">
@@ -397,10 +399,27 @@ const CSV_COLUMNS = [
 // set, then get offered more in increments once they finish one.
 const SPOT_INITIAL = 15;
 const SPOT_EXTRA = 5;
+// At/after this instant, spot-check assignment switches from a fixed
+// shared subset to coverage-aware picking: fruit-days with 0 ratings
+// ("not annotated") go first, then ones with exactly 1 ("needs a
+// secondary check"), and anything already at 2 is excluded entirely.
+// Before this instant, nothing changes — behavior is identical to before.
+// 1:00 PM IST on 27 Sep 2026 = 07:30 UTC (IST is UTC+5:30).
+const SPOT_COVERAGE_DEADLINE = Date.parse("2026-09-27T07:30:00Z");
+const SPOT_READING_CAP = 2;
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function fmtRipe(r){ return r.replace(/^\d+-/, "").replace(/_/g, " "); }
 function sanitizeId(s){ return (s||"").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g,""); }
+// Fisher-Yates: unbiased random order, doesn't mutate the input array.
+function shuffle(arr){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // ---------- local storage (per-device backup + resume) ----------
 function localKey(raterId){ return "fruitgrader_rows_" + raterId; }
@@ -489,6 +508,20 @@ async function syncRowToSheetWithRetry(row){
   }
   throw lastErr;
 }
+// Reads aggregate {fdkey: count} from the Sheet via the Apps Script GET
+// endpoint (see SETUP_GOOGLE_SHEET.md). Returns null on any failure —
+// missing config, old deployment without doGet, network error — so
+// callers can always fall back to the non-coverage-aware behavior rather
+// than getting stuck.
+async function fetchCoverage(){
+  if (!sheetsConfigured()) return null;
+  try {
+    const res = await fetch(CONFIG.sheetsWebAppUrl, { method: "GET" });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return (j && j.ok && j.counts) ? j.counts : null;
+  } catch (e){ return null; }
+}
 
 // ---------- Vue app ----------
 // Rendering is driven by Vue 3 (loaded below from a CDN, no build step
@@ -508,6 +541,9 @@ const App = {
       savedIds: new Set(),
       spotPool: [],
       spotOffered: false,
+      coverageMode: false,
+      coverageCandidates: [],
+      startingSession: false,
       saving: false,
       saveMsg: "",
       exitMsg: "",
@@ -546,6 +582,10 @@ const App = {
       if (!this.lbFname) return "";
       const n = this.lbRetries;
       return CONFIG.imageBaseUrl + this.lbFname + (n ? ("?r=" + n) : "");
+    },
+    remainingSpotCount(){
+      const pool = this.coverageMode ? this.coverageCandidates.length : (this.spotPool.length - this.queue.length);
+      return Math.max(0, Math.min(SPOT_EXTRA, pool));
     }
   },
   watch: {
@@ -620,23 +660,64 @@ const App = {
       });
     },
 
-    startSession(){
+    // Sorts fdkeys by current reading count ascending (0s, i.e. "not
+    // annotated", before 1s, i.e. "needs a secondary check"), excluding
+    // anything already at SPOT_READING_CAP. Ties are shuffled for fairness.
+    rankByCoverage(fdkeys, coverage){
+      const byCount = {};
+      fdkeys.forEach(k => {
+        const c = coverage[k] || 0;
+        if (c >= SPOT_READING_CAP) return;
+        (byCount[c] = byCount[c] || []).push(k);
+      });
+      const counts = Object.keys(byCount).map(Number).sort((a, b) => a - b);
+      let ranked = [];
+      counts.forEach(c => { ranked = ranked.concat(shuffle(byCount[c])); });
+      return ranked;
+    },
+
+    async startSession(){
+      this.startingSession = true;
       if (this.track === "full"){
-        this.queue = MANIFEST.map(r => r.fdkey);
+        // Same items for every full-track rater, shown in a random order
+        // per session so nobody rates them in the same sequence — reduces
+        // ordering/fatigue bias without changing which fruit-days appear.
+        this.queue = shuffle(MANIFEST.map(r => r.fdkey));
+        this.coverageMode = false;
       } else {
-        // Spot-check raters only get an initial batch of SPOT_INITIAL
-        // fruit-days (a fixed prefix of the shared spot-check set, so every
-        // spot-check rater still sees the same items in the same order —
-        // that's what makes inter-rater agreement measurable). Finishing
-        // the batch offers a chance to keep going in SPOT_EXTRA-sized
-        // increments instead of committing to all of them up front.
         this.spotPool = MANIFEST.filter(r => r.track === "spot_check").map(r => r.fdkey);
-        this.queue = this.spotPool.slice(0, SPOT_INITIAL);
+
+        // Before the deadline: unchanged behavior — a fixed shared subset,
+        // shuffled for display order only. At/after it: coverage-aware
+        // assignment, pulling live counts from the Sheet so fruit-days with
+        // 0 or 1 readings are prioritized and none exceed SPOT_READING_CAP.
+        // Falls back to the old behavior if the read fails for any reason.
+        const coverage = (Date.now() >= SPOT_COVERAGE_DEADLINE) ? await fetchCoverage() : null;
+
+        if (coverage){
+          this.coverageMode = true;
+          const ranked = this.rankByCoverage(this.spotPool, coverage);
+          this.queue = ranked.slice(0, SPOT_INITIAL);
+          this.coverageCandidates = ranked.slice(SPOT_INITIAL);
+        } else {
+          this.coverageMode = false;
+          this.queue = shuffle(this.spotPool.slice(0, SPOT_INITIAL));
+        }
       }
       this.form = {};
       this.savedIds = new Set();
       this.spotOffered = false;
       this.exitMsg = "";
+      this.startingSession = false;
+
+      // Coverage mode can legitimately find nothing left to assign — every
+      // spot-check fruit-day already has SPOT_READING_CAP readings. That's
+      // a success state, not an error, so go straight to the thank-you
+      // screen instead of showing an empty rating screen.
+      if (!this.queue.length){
+        this.screen = "done";
+        return;
+      }
 
       this.loadFormsFor(this.queue);
 
@@ -646,8 +727,14 @@ const App = {
     },
 
     acceptSpotOffer(){
-      const remaining = this.spotPool.filter(fdkey => !this.queue.includes(fdkey));
-      const extra = remaining.slice(0, SPOT_EXTRA);
+      let extra;
+      if (this.coverageMode){
+        extra = this.coverageCandidates.slice(0, SPOT_EXTRA);
+        this.coverageCandidates = this.coverageCandidates.slice(SPOT_EXTRA);
+      } else {
+        const remaining = this.spotPool.filter(fdkey => !this.queue.includes(fdkey));
+        extra = shuffle(remaining.slice(0, SPOT_EXTRA));
+      }
       if (!extra.length){ this.screen = "done"; return; }
       const startIdx = this.queue.length;
       this.queue = this.queue.concat(extra);

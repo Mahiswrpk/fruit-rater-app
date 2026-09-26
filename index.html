@@ -57,6 +57,7 @@
     border-radius:10px; border:1px solid var(--line);
     background:var(--surface); color:var(--ink);
     padding:11px 16px; transition:background .15s, border-color .15s, transform .1s;
+    touch-action:manipulation; -webkit-tap-highlight-color:transparent;
   }
   button:active{transform:scale(.98);}
   button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600;}
@@ -169,37 +170,24 @@ const CONFIG = {
   // "https://raw.githubusercontent.com/<you>/<images-repo>/main/images/"
   imageBaseUrl: "images/",
 
-  // Where responses get committed automatically. Each rater's answers
-  // are written to "<responsesPath>/<rater_id>.csv" in this repo, one
-  // row per fruit-day, opens straight in Excel.
+  // Where responses get saved automatically: a Google Sheet, via a tiny
+  // Apps Script "Web app" endpoint that runs under YOUR Google account.
+  // One-time setup (see SETUP_GOOGLE_SHEET.md next to this file for the
+  // full walkthrough with the script to paste in):
+  //   1. Create a Google Sheet.
+  //   2. Extensions > Apps Script, paste in the provided script.
+  //   3. Deploy > New deployment > type "Web app" > Execute as: Me >
+  //      Who has access: Anyone > Deploy. Authorize when prompted.
+  //   4. Copy the "Web app URL" it gives you and paste it below.
   //
-  // SECURITY — read this before filling in `token`:
-  // This token lives in the page's own source, so anyone who opens this
-  // page and looks at "view source" or the browser devtools can read it.
-  // That is unavoidable for a page with no server of its own. Make the
-  // damage bounded if that happens:
-  //   1. Create a GitHub *fine-grained* personal access token (not a
-  //      classic one) at github.com/settings/personal-access-tokens
-  //   2. Scope it to ONLY this one responses repository
-  //   3. Give it ONLY "Contents: Read and write" — no other permission
-  //   4. Set a short expiry (e.g. 90 days) and just regenerate it later
-  // With that scoping, the worst a leaked token can do is write junk
-  // files into this one low-stakes repo — nothing else on your account
-  // is reachable with it. You can revoke or rotate it any time from
-  // GitHub settings with zero code changes here.
-  //
-  // NOTE: a previous token was pasted here and got exposed in a chat
-  // transcript — it has been removed. Revoke that old token on GitHub
-  // and generate a fresh fine-grained PAT before filling this back in.
-  responsesRepo: {
-    owner: "Mahiswrpk",
-    repo: "fruit-rater-responses",
-    branch: "main",
-    responsesPath: "responses",
-    token: "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"  // paste your fine-grained token here, or leave blank to
-               // disable auto-push (ratings still save locally and can
-               // be downloaded as CSV any time)
-  }
+  // Unlike a GitHub token, this URL is safe to leave in the page's
+  // source: it can only ever append/update rows in this one sheet via
+  // the script's own logic — it can't read your Drive, other sheets, or
+  // anything else in your account. Worst case if someone else finds the
+  // URL, they can submit junk rows, which you just delete from the sheet.
+  sheetsWebAppUrl: "https://script.google.com/macros/s/AKfycbxo9UzYA7hUxjonjp7_d7UOD6E6NEOE8urMimr6FhIVKxP1elEhCfGRsZDkpRr2tA6J9Q/exec"  // paste your Apps Script Web app URL here, or leave
+                        // blank to disable auto-sync (ratings still save
+                        // locally and can be downloaded as CSV any time)
 };
 </script>
 
@@ -224,7 +212,7 @@ const CONFIG = {
         </button>
         <button type="button" class="track-card" :class="{selected: track==='spot'}" @click="track='spot'">
           <b>Spot-check</b>
-          <span>Rate a shared subset of {{ nSpot }} fruit-days, the same ones every spot-check rater sees. Used to measure agreement between raters.</span>
+          <span>Rate {{ SPOT_INITIAL }} fruit-days from a shared set the same ones every spot-check rater sees, used to measure agreement between raters. You can optionally add more afterward.</span>
         </button>
       </div>
       <button class="primary" :disabled="!canStart" @click="startSession">Start rating</button>
@@ -250,7 +238,7 @@ const CONFIG = {
         <div class="progress-bar" style="width:160px"><div class="progress-fill" :style="{width: pct+'%'}"></div></div>
       </div>
       <div class="row" style="align-items:center; gap:8px">
-        <span class="sync-pill" :class="syncPillClass" v-if="ghConfigured">{{ syncPillText }}</span>
+        <span class="sync-pill" :class="syncPillClass" v-if="syncConfigured">{{ syncPillText }}</span>
         <span class="sync-pill pending" v-else>local only</span>
         <div class="fdcode">{{ idx+1 }} / {{ total }}<span v-if="alreadySaved"> &middot; saved</span></div>
       </div>
@@ -319,13 +307,22 @@ const CONFIG = {
     </div>
   </div>
 
+  <div class="card finish stack" v-else-if="screen==='spotOffer'">
+    <h2>Keep going?</h2>
+    <p class="kicker">You've rated {{ queue.length }} fruit-days on the spot-check set. If you have a few more minutes, we can add {{ Math.min(SPOT_EXTRA, spotPool.length - queue.length) }} more — every extra rating helps us measure agreement between raters.</p>
+    <div class="row" style="justify-content:center">
+      <button class="ghost" @click="declineSpotOffer">No, I'm done</button>
+      <button class="primary" @click="acceptSpotOffer">Yes, add {{ Math.min(SPOT_EXTRA, spotPool.length - queue.length) }} more</button>
+    </div>
+  </div>
+
   <div class="card finish stack" v-else-if="screen==='done'">
     <h2>All done</h2>
     <p class="kicker">Thank you, {{ rater.trim() }}. You rated {{ queue.length }} fruit-days on the {{ track==='full' ? 'full' : 'spot-check' }} track.</p>
-    <p class="kicker" v-if="pendingCount">{{ pendingCount }} rating(s) haven't synced to GitHub yet (offline or the connection dropped). Try "Retry sync" before you close this tab, or keep the downloaded CSV as a backup.</p>
-    <p class="kicker" v-else-if="ghConfigured">All your ratings are synced to the results repo.</p>
+    <p class="kicker" v-if="pendingCount">{{ pendingCount }} rating(s) haven't synced to the Sheet yet (offline or the connection dropped). Try "Retry sync" before you close this tab, or keep the downloaded CSV as a backup.</p>
+    <p class="kicker" v-else-if="syncConfigured">All your ratings are synced to the results sheet.</p>
     <div class="row" style="justify-content:center">
-      <button class="ghost" v-if="ghConfigured" @click="retrySyncAll">Retry sync</button>
+      <button class="ghost" v-if="syncConfigured" @click="retrySyncAll">Retry sync</button>
       <button class="ghost" @click="downloadCsvNow">Download CSV</button>
       <button class="primary" @click="rateAnother">Rate another set</button>
     </div>
@@ -382,6 +379,10 @@ const CSV_COLUMNS = [
   "rater","rater_id","track","fdkey","species","freshness_grade","spoilage_level",
   "ripeness_stage","defect_type","notes","inedible_marks","submitted_at"
 ];
+// Spot-check raters start with a smaller batch instead of the full shared
+// set, then get offered more in increments once they finish one.
+const SPOT_INITIAL = 15;
+const SPOT_EXTRA = 5;
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function fmtRipe(r){ return r.replace(/^\d+-/, "").replace(/_/g, " "); }
@@ -446,66 +447,37 @@ function downloadCsv(raterId){
   URL.revokeObjectURL(url);
 }
 
-// ---------- GitHub sync ----------
-const GH_API = "https://api.github.com";
-function githubConfigured(){
-  const c = CONFIG.responsesRepo;
-  return !!(c.token && c.owner && c.owner !== "YOUR_GITHUB_USERNAME" && c.repo && c.repo !== "YOUR_RESPONSES_REPO");
+// ---------- Google Sheets sync ----------
+// Each row is POSTed as JSON to the Apps Script Web app endpoint, which
+// does the upsert (match on rater_id + fdkey, else append) on the sheet
+// side — see SETUP_GOOGLE_SHEET.md for the script. Sending the body as a
+// plain string (not with an explicit "application/json" Content-Type)
+// keeps this a CORS "simple request", which is what lets Apps Script Web
+// apps accept cross-origin POSTs from a page like this one without any
+// preflight dance.
+function sheetsConfigured(){
+  return !!(CONFIG.sheetsWebAppUrl && CONFIG.sheetsWebAppUrl.startsWith("https://"));
 }
-function b64EncodeUtf8(str){ return btoa(unescape(encodeURIComponent(str))); }
-function b64DecodeUtf8(str){ return decodeURIComponent(escape(atob(str))); }
-
-async function ghGetFile(path){
-  const {owner, repo, branch, token} = CONFIG.responsesRepo;
-  const res = await fetch(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+async function syncRowToSheet(row){
+  const res = await fetch(CONFIG.sheetsWebAppUrl, {
+    method: "POST",
+    body: JSON.stringify(row)
   });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error("GitHub read failed: " + res.status);
-  const j = await res.json();
-  return { sha: j.sha, content: b64DecodeUtf8((j.content || "").replace(/\n/g, "")) };
+  if (!res.ok) throw new Error("Sheet write failed: " + res.status);
+  const j = await res.json().catch(() => ({}));
+  if (j && j.ok === false) throw new Error("Sheet write failed: " + (j.error || "unknown error"));
 }
-async function ghPutFile(path, content, message, sha){
-  const {owner, repo, branch, token} = CONFIG.responsesRepo;
-  const res = await fetch(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
-    body: JSON.stringify(Object.assign({ message, content: b64EncodeUtf8(content), branch }, sha ? {sha} : {}))
-  });
-  if (!res.ok){
-    const t = await res.text().catch(() => "");
-    throw new Error("GitHub write failed: " + res.status + " " + t);
-  }
-  return res.json();
-}
-async function syncRowToGithub(row){
-  const path = `${CONFIG.responsesRepo.responsesPath}/${row.rater_id}.csv`;
-  const existing = await ghGetFile(path);
-  let dataRows = [];
-  if (existing){
-    const parsed = parseCsv(existing.content);
-    const header = parsed[0] || CSV_COLUMNS;
-    dataRows = parsed.slice(1).map(r => {
-      const obj = {};
-      header.forEach((h, i) => obj[h] = r[i] ?? "");
-      return obj;
-    });
-  }
-  const idx = dataRows.findIndex(r => r.fdkey === row.fdkey);
-  if (idx >= 0) dataRows[idx] = row; else dataRows.push(row);
-  await ghPutFile(path, rowsToCsv(dataRows), `Ratings from ${row.rater} — ${row.fdkey}`, existing ? existing.sha : null);
-}
-async function syncRowToGithubWithRetry(row){
+async function syncRowToSheetWithRetry(row){
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++){
-    try { await syncRowToGithub(row); return; }
+    try { await syncRowToSheet(row); return; }
     catch (e){ lastErr = e; }
   }
   throw lastErr;
 }
 
 // ---------- Vue app ----------
-// Rendering is now driven by Vue 3 (loaded below from a CDN, no build step
+// Rendering is driven by Vue 3 (loaded below from a CDN, no build step
 // needed for GitHub Pages). Vue diffs the DOM and only patches the nodes
 // that actually changed, so selecting a grade/defect/spoilage choice no
 // longer tears down and rebuilds the whole screen — nothing else on the
@@ -520,6 +492,8 @@ const App = {
       idx: 0,
       form: {},
       savedIds: new Set(),
+      spotPool: [],
+      spotOffered: false,
       saving: false,
       saveMsg: "",
       exitMsg: "",
@@ -527,17 +501,16 @@ const App = {
       lbFname: null,
       activeStroke: null,
       lbCtx: null,
-      GRADES, SPOILAGE, DEFECTS
+      GRADES, SPOILAGE, DEFECTS, SPOT_INITIAL, SPOT_EXTRA
     };
   },
   computed: {
     nFull(){ return MANIFEST.length; },
-    nSpot(){ return MANIFEST.filter(r => r.track === "spot_check").length; },
     canStart(){ return this.rater.trim().length >= 2 && !!this.track; },
-    ghConfigured(){ return githubConfigured(); },
+    syncConfigured(){ return sheetsConfigured(); },
     storageNote(){
-      return this.ghConfigured
-        ? "Each rating saves to this device immediately, then syncs automatically to the results repo. You can close this and come back any time."
+      return this.syncConfigured
+        ? "Each rating saves to this device immediately, then syncs automatically to the results sheet. You can close this and come back any time."
         : "Auto-sync isn't set up yet, so ratings are saved on this device only. Use \"Download CSV\" on the finish screen to hand off your file.";
     },
     rec(){ return MANIFEST.find(r => r.fdkey === this.queue[this.idx]); },
@@ -575,19 +548,16 @@ const App = {
     },
     goBack(){ this.idx = Math.max(0, this.idx - 1); },
 
-    startSession(){
-      const list = MANIFEST.filter(r => this.track === "full" ? true : r.track === "spot_check");
-      this.queue = list.map(r => r.fdkey);
-      this.savedIds = new Set();
-      this.exitMsg = "";
-
+    // Builds (or extends) form entries for the given fdkeys, pulling in any
+    // already-saved answers from localStorage so resuming a session still
+    // works. Mutates this.form / this.savedIds rather than replacing them,
+    // so it's safe to call again when the spot-check queue grows.
+    loadFormsFor(fdkeys){
       const saved = {};
       loadLocal(this.raterId).forEach(row => {
-        if (this.queue.includes(row.fdkey)) saved[row.fdkey] = row;
+        if (fdkeys.includes(row.fdkey)) saved[row.fdkey] = row;
       });
-
-      const forms = {};
-      this.queue.forEach(fdkey => {
+      fdkeys.forEach(fdkey => {
         const row = saved[fdkey];
         if (row){
           this.savedIds.add(fdkey);
@@ -602,21 +572,53 @@ const App = {
               });
             });
           } catch(e){}
-          forms[fdkey] = {
+          this.form[fdkey] = {
             grade: row.freshness_grade, spoilage: row.spoilage_level, ripeness: row.ripeness_stage,
             defects: new Set((row.defect_type || "none").split(",").filter(Boolean)),
             notes: row.notes || "", marks
           };
         } else {
-          forms[fdkey] = { grade: null, spoilage: null, ripeness: null, defects: new Set(["none"]), notes: "", marks: {} };
+          this.form[fdkey] = { grade: null, spoilage: null, ripeness: null, defects: new Set(["none"]), notes: "", marks: {} };
         }
       });
-      this.form = forms;
+    },
+
+    startSession(){
+      if (this.track === "full"){
+        this.queue = MANIFEST.map(r => r.fdkey);
+      } else {
+        // Spot-check raters only get an initial batch of SPOT_INITIAL
+        // fruit-days (a fixed prefix of the shared spot-check set, so every
+        // spot-check rater still sees the same items in the same order —
+        // that's what makes inter-rater agreement measurable). Finishing
+        // the batch offers a chance to keep going in SPOT_EXTRA-sized
+        // increments instead of committing to all of them up front.
+        this.spotPool = MANIFEST.filter(r => r.track === "spot_check").map(r => r.fdkey);
+        this.queue = this.spotPool.slice(0, SPOT_INITIAL);
+      }
+      this.form = {};
+      this.savedIds = new Set();
+      this.spotOffered = false;
+      this.exitMsg = "";
+
+      this.loadFormsFor(this.queue);
 
       const firstUnanswered = this.queue.findIndex(k => !this.savedIds.has(k));
       this.idx = firstUnanswered === -1 ? 0 : firstUnanswered;
       this.screen = "rate";
     },
+
+    acceptSpotOffer(){
+      const remaining = this.spotPool.filter(fdkey => !this.queue.includes(fdkey));
+      const extra = remaining.slice(0, SPOT_EXTRA);
+      if (!extra.length){ this.screen = "done"; return; }
+      const startIdx = this.queue.length;
+      this.queue = this.queue.concat(extra);
+      this.loadFormsFor(extra);
+      this.idx = startIdx;
+      this.screen = "rate";
+    },
+    declineSpotOffer(){ this.screen = "done"; },
 
     buildRow(rec){
       const f = this.form[rec.fdkey];
@@ -636,8 +638,8 @@ const App = {
       const row = this.buildRow(rec);
       saveLocal(row);
       let pushed = false;
-      if (githubConfigured()){
-        try { await syncRowToGithubWithRetry(row); pushed = true; row.synced = true; saveLocal(row); }
+      if (sheetsConfigured()){
+        try { await syncRowToSheetWithRetry(row); pushed = true; row.synced = true; saveLocal(row); }
         catch (e){ pushed = false; }
       }
       this.savedIds.add(rec.fdkey);
@@ -648,25 +650,30 @@ const App = {
       this.saving = true; this.saveMsg = "Saving…";
       const pushed = await this.saveRow(rec);
       this.saving = false;
-      this.saveMsg = !this.ghConfigured ? "Saved on this device."
-        : pushed ? "Saved to GitHub." : "Saved locally — will retry sync.";
+      this.saveMsg = !this.syncConfigured ? "Saved on this device."
+        : pushed ? "Saved to Sheet." : "Saved locally — will retry sync.";
       if (this.idx < this.queue.length - 1){ this.idx += 1; this.saveMsg = ""; }
-      else { this.screen = "done"; }
+      else if (this.track === "spot" && !this.spotOffered){
+        this.spotOffered = true;
+        this.screen = "spotOffer";
+      } else {
+        this.screen = "done";
+      }
     },
     async saveAndExit(){
       const rec = this.rec;
       this.saving = true; this.saveMsg = "Saving…";
       const pushed = await this.saveRow(rec);
       this.saving = false; this.saveMsg = "";
-      this.exitMsg = !this.ghConfigured ? "Progress saved on this device — pick the same name and set to pick up where you left off."
-        : pushed ? "Progress saved to GitHub — pick the same name and set to pick up where you left off."
+      this.exitMsg = !this.syncConfigured ? "Progress saved on this device — pick the same name and set to pick up where you left off."
+        : pushed ? "Progress saved to the Sheet — pick the same name and set to pick up where you left off."
         : "Progress saved locally — will retry sync. Pick the same name and set to pick up where you left off.";
       this.screen = "landing"; this.track = null;
     },
     async retrySyncAll(){
       const pending = loadLocal(this.raterId).filter(r => !r.synced);
       for (const row of pending){
-        try { await syncRowToGithubWithRetry(row); row.synced = true; saveLocal(row); }
+        try { await syncRowToSheetWithRetry(row); row.synced = true; saveLocal(row); }
         catch (e){ break; }
       }
     },
@@ -758,6 +765,15 @@ const App = {
   },
   mounted(){
     window.addEventListener("resize", () => { if (this.lightboxOpen) this.setupCanvas(); });
+    // Tapping a <button> gives it keyboard focus, and both iOS Safari and
+    // Android Chrome then auto-scroll the page to bring that focused
+    // element fully into view — that's the "whole page jumps" on every
+    // tap, and it happens regardless of how the DOM is rendered. Stopping
+    // the mousedown's default action prevents the focus (and therefore the
+    // scroll) without blocking the click that follows it.
+    document.addEventListener("mousedown", e => {
+      if (e.target.closest("button")) e.preventDefault();
+    });
   }
 };
 </script>

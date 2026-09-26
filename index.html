@@ -397,6 +397,7 @@ function el(tag, attrs, ...kids){
     if (k === "class") n.className = attrs[k];
     else if (k === "html") n.innerHTML = attrs[k];
     else if (k.startsWith("on")) n.addEventListener(k.slice(2), attrs[k]);
+    else if (typeof attrs[k] === "boolean") { if (attrs[k]) n.setAttribute(k, k); }
     else n.setAttribute(k, attrs[k]);
   }
   for (const kid of kids){

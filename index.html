@@ -126,7 +126,6 @@
     position:fixed; inset:0; background:rgba(0,0,0,.88); display:flex;
     align-items:center; justify-content:center; z-index:50; padding:14px;
   }
-  .lightbox[hidden]{display:none;}
   .lightbox-panel{display:flex; flex-direction:column; gap:10px; align-items:center; max-width:100%; max-height:100%;}
   .lightbox-bar{display:flex; justify-content:space-between; align-items:center; gap:10px; width:100%; flex-wrap:wrap;}
   .lightbox-hint{color:#dfe6e1; font-size:12.5px; max-width:220px; line-height:1.4;}
@@ -188,6 +187,10 @@ const CONFIG = {
   // files into this one low-stakes repo — nothing else on your account
   // is reachable with it. You can revoke or rotate it any time from
   // GitHub settings with zero code changes here.
+  //
+  // NOTE: a previous token was pasted here and got exposed in a chat
+  // transcript — it has been removed. Revoke that old token on GitHub
+  // and generate a fresh fine-grained PAT before filling this back in.
   responsesRepo: {
     owner: "Mahiswrpk",
     repo: "fruit-rater-responses",
@@ -200,21 +203,154 @@ const CONFIG = {
 };
 </script>
 
-<div class="wrap" id="app"></div>
+<div class="wrap" id="app">
+  <div class="stack" v-if="screen==='landing'">
+    <div class="card" v-if="exitMsg" style="padding:12px 14px;">
+      <div class="save-note" style="font-size:13px;">{{ exitMsg }}</div>
+    </div>
+    <div class="stack">
+      <div class="eyebrow">Fruit quality &middot; independent relabel</div>
+      <h1>Blind Fruit Grader</h1>
+      <p class="kicker">You'll see photos of a banana or guava on one storage day, with no dates, IDs or existing labels attached. Grade what you see. Your ratings are compared against the original labels to check how consistent they are.</p>
+    </div>
+    <div class="card stack">
+      <label class="eyebrow" for="rater-name">Your name</label>
+      <input type="text" id="rater-name" placeholder="e.g. Priya" :value="rater" @input="onNameInput">
+      <div class="eyebrow">Which set will you rate?</div>
+      <div class="track-pick">
+        <button type="button" class="track-card" :class="{selected: track==='full'}" @click="track='full'">
+          <b>Full grading</b>
+          <span>Rate all {{ nFull }} fruit-days. This is the complete independent relabel.</span>
+        </button>
+        <button type="button" class="track-card" :class="{selected: track==='spot'}" @click="track='spot'">
+          <b>Spot-check</b>
+          <span>Rate a shared subset of {{ nSpot }} fruit-days, the same ones every spot-check rater sees. Used to measure agreement between raters.</span>
+        </button>
+      </div>
+      <button class="primary" :disabled="!canStart" @click="startSession">Start rating</button>
+      <div class="save-note">{{ storageNote }}</div>
+    </div>
+    <details class="rubric">
+      <summary>Grading guide</summary>
+      <ul>
+        <li><b>A — pristine: </b>uniform colour, no wrinkling, no leakage, no mould, no visible marks.</li>
+        <li><b>B — sound: </b>intact skin, natural ripening progression, no damage.</li>
+        <li><b>C — worn: </b>intact but visibly bruised, scarred or discoloured; no wet leakage or mould.</li>
+        <li><b>D — deteriorated: </b>extensive discolouration, dents or soft spots, heavy visible deterioration.</li>
+        <li><b>Spoilage: </b>fresh &rarr; mild decline (early soft spots or dulling) &rarr; spoiled (clear rot/mould/leakage in places) &rarr; severely spoiled (majority of surface affected).</li>
+        <li><b>Ripeness: </b>judge by skin colour only — green/unripe through fully coloured/soft-ripe, species-specific stages shown per item.</li>
+      </ul>
+    </details>
+  </div>
 
-<div class="lightbox" id="lightbox" hidden>
-  <div class="lightbox-panel">
-    <div class="lightbox-bar">
-      <div class="lightbox-hint">Draw over any part you personally wouldn't eat — optional, helps flag exactly where.</div>
-      <div class="row" style="gap:6px">
-        <button type="button" class="ghost" id="lb-undo">Undo</button>
-        <button type="button" class="ghost" id="lb-clear">Clear</button>
-        <button type="button" class="primary" id="lb-done">Done</button>
+  <div class="stack" v-else-if="screen==='rate' && rec">
+    <div class="topbar">
+      <div class="stack" style="gap:4px">
+        <div class="eyebrow">{{ track==='full' ? 'Full grading' : 'Spot-check' }}</div>
+        <div class="progress-bar" style="width:160px"><div class="progress-fill" :style="{width: pct+'%'}"></div></div>
+      </div>
+      <div class="row" style="align-items:center; gap:8px">
+        <span class="sync-pill" :class="syncPillClass" v-if="ghConfigured">{{ syncPillText }}</span>
+        <span class="sync-pill pending" v-else>local only</span>
+        <div class="fdcode">{{ idx+1 }} / {{ total }}<span v-if="alreadySaved"> &middot; saved</span></div>
       </div>
     </div>
-    <div class="lightbox-imgwrap" id="lightbox-imgwrap">
-      <img id="lightbox-img" alt="fruit photo, full size">
-      <canvas id="lightbox-canvas"></canvas>
+
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between; align-items:center">
+        <h2>{{ fmtSpecies(rec.species) }}</h2>
+        <span class="badge">no dates or IDs shown — grade only what you see</span>
+      </div>
+      <div class="gallery">
+        <div v-for="fname in rec.images" :key="fname" class="thumb" :class="{marked: hasMark(fname)}" @click="openLightbox(fname)">
+          <img :src="imgSrc(fname)" alt="fruit photo">
+          <span class="mark-dot" v-if="hasMark(fname)"></span>
+        </div>
+      </div>
+      <div class="kicker" style="font-size:12.5px">Tap a photo to open it full-size and draw over any part you personally wouldn't eat.</div>
+    </div>
+
+    <div class="card stack">
+      <fieldset>
+        <legend>Freshness grade <span class="req">*</span></legend>
+        <div class="choice-grid">
+          <button type="button" v-for="g in GRADES" :key="g.v" class="choice" :class="['grade-'+g.v, {selected: currentForm.grade===g.v}]" @click="currentForm.grade=g.v">
+            <span class="dot"></span>{{ g.label.split(' — ')[0] }}<small>{{ g.hint }}</small>
+          </button>
+        </div>
+      </fieldset>
+      <div class="divider"></div>
+      <fieldset>
+        <legend>Spoilage level <span class="req">*</span></legend>
+        <div class="choice-grid">
+          <button type="button" v-for="s in SPOILAGE" :key="s.v" class="choice" :class="{selected: currentForm.spoilage===s.v}" @click="currentForm.spoilage=s.v">{{ s.label }}</button>
+        </div>
+      </fieldset>
+      <div class="divider"></div>
+      <fieldset>
+        <legend>Ripeness stage <span class="req">*</span></legend>
+        <div class="choice-grid">
+          <button type="button" v-for="r in ripenessOptions" :key="r" class="choice" :class="{selected: currentForm.ripeness===r}" @click="currentForm.ripeness=r">{{ fmtRipe(r) }}</button>
+        </div>
+      </fieldset>
+      <div class="divider"></div>
+      <fieldset>
+        <legend>Visible defects (optional, pick any)</legend>
+        <div class="defect-grid">
+          <button type="button" v-for="d in DEFECTS" :key="d" class="choice" :class="{selected: currentForm.defects.has(d)}" @click="toggleDefect(d)">{{ d }}</button>
+        </div>
+      </fieldset>
+      <div class="divider"></div>
+      <fieldset>
+        <legend>Notes</legend>
+        <textarea placeholder="Optional notes (anything unusual, uncertain, or worth flagging)" :value="currentForm.notes" @input="currentForm.notes=$event.target.value"></textarea>
+      </fieldset>
+    </div>
+
+    <div class="row" style="justify-content:space-between; align-items:center">
+      <button class="ghost" :disabled="idx===0" @click="goBack">Back</button>
+      <div class="row" style="gap:8px; align-items:center">
+        <button class="ghost" :disabled="!ready || saving" @click="saveAndExit">Save &amp; continue later</button>
+        <div class="stack" style="gap:2px; align-items:flex-end">
+          <div class="save-note">{{ saveMsg }}</div>
+          <button class="primary" :disabled="!ready || saving" @click="submitCurrent">{{ idx===total-1 ? 'Save & finish' : 'Save & next' }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card finish stack" v-else-if="screen==='done'">
+    <h2>All done</h2>
+    <p class="kicker">Thank you, {{ rater.trim() }}. You rated {{ queue.length }} fruit-days on the {{ track==='full' ? 'full' : 'spot-check' }} track.</p>
+    <p class="kicker" v-if="pendingCount">{{ pendingCount }} rating(s) haven't synced to GitHub yet (offline or the connection dropped). Try "Retry sync" before you close this tab, or keep the downloaded CSV as a backup.</p>
+    <p class="kicker" v-else-if="ghConfigured">All your ratings are synced to the results repo.</p>
+    <div class="row" style="justify-content:center">
+      <button class="ghost" v-if="ghConfigured" @click="retrySyncAll">Retry sync</button>
+      <button class="ghost" @click="downloadCsvNow">Download CSV</button>
+      <button class="primary" @click="rateAnother">Rate another set</button>
+    </div>
+  </div>
+
+  <div class="lightbox" v-show="lightboxOpen" @click="closeLightbox">
+    <div class="lightbox-panel" @click.stop>
+      <div class="lightbox-bar">
+        <div class="lightbox-hint">Draw over any part you personally wouldn't eat — optional, helps flag exactly where.</div>
+        <div class="row" style="gap:6px">
+          <button type="button" class="ghost" @click.stop="undoStroke">Undo</button>
+          <button type="button" class="ghost" @click.stop="clearStrokes">Clear</button>
+          <button type="button" class="primary" @click.stop="closeLightbox">Done</button>
+        </div>
+      </div>
+      <div class="lightbox-imgwrap">
+        <img ref="lbImg" :src="lbSrc" alt="fruit photo, full size" @load="setupCanvas">
+        <canvas ref="lbCanvas"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerUp"
+          @pointercancel="onPointerUp"
+          @pointerleave="onPointerUp"
+        ></canvas>
+      </div>
     </div>
   </div>
 </div>
@@ -367,519 +503,267 @@ async function syncRowToGithubWithRetry(row){
   }
   throw lastErr;
 }
-async function retrySync(){
-  const raterId = sanitizeId(state.rater);
-  const pending = loadLocal(raterId).filter(r => !r.synced);
-  for (const row of pending){
-    try { await syncRowToGithubWithRetry(row); row.synced = true; saveLocal(row); }
-    catch (e){ break; }
-  }
-  render();
-}
 
-// ---------- state ----------
-const state = {
-  screen: "landing",
-  rater: "",
-  track: null,
-  queue: [],
-  idx: 0,
-  form: {},
-  savedIds: new Set(),
-  saving: false,
-  saveMsg: "",
-  exitMsg: ""
-};
-
-// ---------- tiny DOM helper ----------
-function el(tag, attrs, ...kids){
-  const n = document.createElement(tag);
-  if (attrs) for (const k in attrs){
-    if (k === "class") n.className = attrs[k];
-    else if (k === "html") n.innerHTML = attrs[k];
-    else if (k.startsWith("on")) n.addEventListener(k.slice(2), attrs[k]);
-    else if (typeof attrs[k] === "boolean") { if (attrs[k]) n.setAttribute(k, k); }
-    else n.setAttribute(k, attrs[k]);
-  }
-  for (const kid of kids){
-    if (kid == null) continue;
-    n.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
-  }
-  return n;
-}
-
-function render(){
-  const app = document.getElementById("app");
-  const renderKey = state.screen + (state.screen === "rate" ? ":" + state.idx : "");
-  const prevKey = app.dataset.renderKey;
-  const scrollY = window.scrollY;
-  app.innerHTML = "";
-  if (state.screen === "landing") app.appendChild(renderLanding());
-  else if (state.screen === "rate") app.appendChild(renderRate());
-  else if (state.screen === "done") app.appendChild(renderDone());
-  app.dataset.renderKey = renderKey;
-  // Rebuilding the DOM resets scroll to the top; restore it when we're just
-  // re-rendering the same fruit/screen (e.g. tapping a grade choice), but
-  // jump to the top when we've actually moved to a new fruit or screen.
-  // iOS Safari applies scroll changes made mid-task inconsistently (it can
-  // silently re-snap to 0 after layout finishes), so re-apply it a couple of
-  // animation frames later as well, once the new layout has actually settled.
-  const targetY = (prevKey === renderKey) ? scrollY : 0;
-  window.scrollTo(0, targetY);
-  requestAnimationFrame(() => {
-    window.scrollTo(0, targetY);
-    requestAnimationFrame(() => window.scrollTo(0, targetY));
-  });
-}
-
-function renderLanding(){
-  const nFull = MANIFEST.length;
-  const nSpot = MANIFEST.filter(r => r.track === "spot_check").length;
-
-  const nameInput = el("input", {
-    type:"text", id:"rater-name", placeholder:"e.g. Priya",
-    value: state.rater,
-    oninput: e => { state.rater = e.target.value; state.exitMsg = ""; updateStartBtn(); }
-  });
-
-  const fullCard = el("button", {
-    class:"track-card" + (state.track === "full" ? " selected" : ""),
-    onclick: () => { state.track = "full"; render(); }
-  }, el("b", null, "Full grading"),
-     el("span", null, `Rate all ${nFull} fruit-days. This is the complete independent relabel.`));
-
-  const spotCard = el("button", {
-    class:"track-card" + (state.track === "spot" ? " selected" : ""),
-    onclick: () => { state.track = "spot"; render(); }
-  }, el("b", null, "Spot-check"),
-     el("span", null, `Rate a shared subset of ${nSpot} fruit-days, the same ones every spot-check rater sees. Used to measure agreement between raters.`));
-
-  const startBtn = el("button", {
-    class:"primary", id:"start-btn", disabled:"disabled", onclick: startSession
-  }, "Start rating");
-
-  const storageNote = githubConfigured()
-    ? "Each rating saves to this device immediately, then syncs automatically to the results repo. You can close this and come back any time."
-    : "Auto-sync isn't set up yet, so ratings are saved on this device only. Use \"Download CSV\" on the finish screen to hand off your file.";
-
-  const exitNote = state.exitMsg ? el("div", {class:"card", style:"padding:12px 14px;"},
-    el("div", {class:"save-note", style:"font-size:13px;"}, state.exitMsg)) : null;
-
-  return el("div", {class:"stack"},
-    exitNote,
-    el("div", {class:"stack"},
-      el("div", {class:"eyebrow"}, "Fruit quality · independent relabel"),
-      el("h1", null, "Blind Fruit Grader"),
-      el("p", {class:"kicker"},
-        "You'll see photos of a banana or guava on one storage day, with no dates, IDs or existing labels attached. Grade what you see. Your ratings are compared against the original labels to check how consistent they are.")
-    ),
-    el("div", {class:"card stack"},
-      el("label", {class:"eyebrow", for:"rater-name"}, "Your name"),
-      nameInput,
-      el("div", {class:"eyebrow"}, "Which set will you rate?"),
-      el("div", {class:"track-pick"}, fullCard, spotCard),
-      startBtn,
-      el("div", {class:"save-note"}, storageNote)
-    ),
-    renderRubric()
-  );
-}
-
-function renderRubric(){
-  return el("details", {class:"rubric"},
-    el("summary", null, "Grading guide"),
-    el("ul", null,
-      el("li", null, el("b", null,"A — pristine: "), "uniform colour, no wrinkling, no leakage, no mould, no visible marks."),
-      el("li", null, el("b", null,"B — sound: "), "intact skin, natural ripening progression, no damage."),
-      el("li", null, el("b", null,"C — worn: "), "intact but visibly bruised, scarred or discoloured; no wet leakage or mould."),
-      el("li", null, el("b", null,"D — deteriorated: "), "extensive discolouration, dents or soft spots, heavy visible deterioration."),
-      el("li", null, el("b", null,"Spoilage: "), "fresh → mild decline (early soft spots or dulling) → spoiled (clear rot/mould/leakage in places) → severely spoiled (majority of surface affected)."),
-      el("li", null, el("b", null,"Ripeness: "), "judge by skin colour only — green/unripe through fully coloured/soft-ripe, species-specific stages shown per item.")
-    )
-  );
-}
-
-function updateStartBtn(){
-  const btn = document.getElementById("start-btn");
-  if (!btn) return;
-  btn.disabled = !(state.rater.trim().length >= 2 && state.track);
-}
-
-function startSession(){
-  const track = state.track;
-  const list = MANIFEST.filter(r => track === "full" ? true : r.track === "spot_check");
-  state.queue = list.map(r => r.fdkey);
-  state.form = {};
-  state.savedIds = new Set();
-  state.exitMsg = "";
-
-  const raterId = sanitizeId(state.rater);
-  loadLocal(raterId).forEach(row => {
-    if (!state.queue.includes(row.fdkey)) return;
-    state.savedIds.add(row.fdkey);
-    const marks = {};
-    try {
-      const parsed = row.inedible_marks ? JSON.parse(row.inedible_marks) : {};
-      Object.keys(parsed).forEach(fn => {
-        marks[fn] = parsed[fn].map(flat => {
-          const pts = [];
-          for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i+1]]);
-          return pts;
-        });
-      });
-    } catch(e){}
-    state.form[row.fdkey] = {
-      grade: row.freshness_grade, spoilage: row.spoilage_level, ripeness: row.ripeness_stage,
-      defects: new Set((row.defect_type || "none").split(",").filter(Boolean)),
-      notes: row.notes, marks
+// ---------- Vue app ----------
+// Rendering is now driven by Vue 3 (loaded below from a CDN, no build step
+// needed for GitHub Pages). Vue diffs the DOM and only patches the nodes
+// that actually changed, so selecting a grade/defect/spoilage choice no
+// longer tears down and rebuilds the whole screen — nothing else on the
+// page moves, and there's no need for the old manual scroll-restore hacks.
+const App = {
+  data(){
+    return {
+      screen: "landing",
+      rater: "",
+      track: null,
+      queue: [],
+      idx: 0,
+      form: {},
+      savedIds: new Set(),
+      saving: false,
+      saveMsg: "",
+      exitMsg: "",
+      lightboxOpen: false,
+      lbFname: null,
+      activeStroke: null,
+      lbCtx: null,
+      GRADES, SPOILAGE, DEFECTS
     };
-  });
-
-  const firstUnanswered = state.queue.findIndex(k => !state.savedIds.has(k));
-  state.idx = firstUnanswered === -1 ? 0 : firstUnanswered;
-  state.screen = "rate";
-  render();
-}
-
-function currentRecord(){
-  const fdkey = state.queue[state.idx];
-  return MANIFEST.find(r => r.fdkey === fdkey);
-}
-
-function renderRate(){
-  const rec = currentRecord();
-  if (!rec){ state.screen = "done"; render(); return el("div"); }
-
-  const f = state.form[rec.fdkey] || (state.form[rec.fdkey] = {defects: new Set(["none"]), marks: {}});
-  const total = state.queue.length;
-  const pct = Math.round((state.idx / total) * 100);
-
-  const gallery = el("div", {class:"gallery"});
-  rec.images.forEach(fname => {
-    const hasMark = f.marks[fname] && f.marks[fname].length > 0;
-    gallery.appendChild(el("div", {
-      class: "thumb" + (hasMark ? " marked" : ""),
-      onclick: () => openLightbox(fname, rec, f)
+  },
+  computed: {
+    nFull(){ return MANIFEST.length; },
+    nSpot(){ return MANIFEST.filter(r => r.track === "spot_check").length; },
+    canStart(){ return this.rater.trim().length >= 2 && !!this.track; },
+    ghConfigured(){ return githubConfigured(); },
+    storageNote(){
+      return this.ghConfigured
+        ? "Each rating saves to this device immediately, then syncs automatically to the results repo. You can close this and come back any time."
+        : "Auto-sync isn't set up yet, so ratings are saved on this device only. Use \"Download CSV\" on the finish screen to hand off your file.";
     },
-      el("img", {src: CONFIG.imageBaseUrl + fname, alt:"fruit photo"}),
-      hasMark ? el("span", {class:"mark-dot"}) : null
-    ));
-  });
-
-  const gradeChoices = el("div", {class:"choice-grid"});
-  GRADES.forEach(g => {
-    gradeChoices.appendChild(el("button", {
-      type:"button", class:"choice grade-" + g.v + (f.grade === g.v ? " selected" : ""),
-      onclick: () => { f.grade = g.v; render(); }
-    }, el("span", {class:"dot"}), g.label.split(" — ")[0], el("small", null, g.hint)));
-  });
-
-  const spoilChoices = el("div", {class:"choice-grid"});
-  SPOILAGE.forEach(s => {
-    spoilChoices.appendChild(el("button", {
-      type:"button", class:"choice" + (f.spoilage === s.v ? " selected" : ""),
-      onclick: () => { f.spoilage = s.v; render(); }
-    }, s.label));
-  });
-
-  const ripeChoices = el("div", {class:"choice-grid"});
-  RIPENESS[rec.species].forEach(r => {
-    ripeChoices.appendChild(el("button", {
-      type:"button", class:"choice" + (f.ripeness === r ? " selected" : ""),
-      onclick: () => { f.ripeness = r; render(); }
-    }, fmtRipe(r)));
-  });
-
-  const defectGrid = el("div", {class:"defect-grid"});
-  DEFECTS.forEach(d => {
-    const active = f.defects.has(d);
-    defectGrid.appendChild(el("button", {
-      type:"button", class:"choice" + (active ? " selected" : ""),
-      onclick: () => {
-        if (d === "none"){ f.defects = new Set(["none"]); }
-        else {
-          f.defects.delete("none");
-          if (active) f.defects.delete(d); else f.defects.add(d);
-          if (f.defects.size === 0) f.defects.add("none");
-        }
-        render();
+    rec(){ return MANIFEST.find(r => r.fdkey === this.queue[this.idx]); },
+    total(){ return this.queue.length; },
+    pct(){ return this.total ? Math.round((this.idx / this.total) * 100) : 0; },
+    ripenessOptions(){ return this.rec ? RIPENESS[this.rec.species] : []; },
+    currentForm(){ return this.rec ? this.form[this.rec.fdkey] : null; },
+    ready(){ const f = this.currentForm; return !!(f && f.grade && f.spoilage && f.ripeness); },
+    alreadySaved(){ return !!(this.rec && this.savedIds.has(this.rec.fdkey)); },
+    raterId(){ return sanitizeId(this.rater); },
+    pendingCount(){ return loadLocal(this.raterId).filter(r => !r.synced).length; },
+    syncPillText(){ return this.pendingCount ? `${this.pendingCount} pending sync` : "synced"; },
+    syncPillClass(){ return this.pendingCount ? "pending" : "ok"; },
+    lbSrc(){ return this.lbFname ? CONFIG.imageBaseUrl + this.lbFname : ""; }
+  },
+  watch: {
+    // Jump to top only on an actual screen or fruit change — never on a
+    // same-screen click (grade/defect/spoilage), so those never scroll.
+    screen(){ window.scrollTo(0, 0); },
+    idx(){ window.scrollTo(0, 0); }
+  },
+  methods: {
+    fmtSpecies, fmtRipe,
+    imgSrc(fname){ return CONFIG.imageBaseUrl + fname; },
+    hasMark(fname){ const f = this.currentForm; return !!(f && f.marks[fname] && f.marks[fname].length); },
+    onNameInput(e){ this.rater = e.target.value; this.exitMsg = ""; },
+    toggleDefect(d){
+      const f = this.currentForm;
+      if (d === "none"){ f.defects = new Set(["none"]); }
+      else {
+        f.defects.delete("none");
+        if (f.defects.has(d)) f.defects.delete(d); else f.defects.add(d);
+        if (f.defects.size === 0) f.defects.add("none");
       }
-    }, d));
-  });
+    },
+    goBack(){ this.idx = Math.max(0, this.idx - 1); },
 
-  const notes = el("textarea", {
-    placeholder:"Optional notes (anything unusual, uncertain, or worth flagging)",
-    oninput: e => { f.notes = e.target.value; }
-  });
-  notes.value = f.notes || "";
+    startSession(){
+      const list = MANIFEST.filter(r => this.track === "full" ? true : r.track === "spot_check");
+      this.queue = list.map(r => r.fdkey);
+      this.savedIds = new Set();
+      this.exitMsg = "";
 
-  const ready = f.grade && f.spoilage && f.ripeness;
-  const alreadySaved = state.savedIds.has(rec.fdkey);
+      const saved = {};
+      loadLocal(this.raterId).forEach(row => {
+        if (this.queue.includes(row.fdkey)) saved[row.fdkey] = row;
+      });
 
-  const submitBtn = el("button", {
-    class:"primary", disabled: !ready || state.saving,
-    onclick: () => submitCurrent(rec)
-  }, state.idx === total - 1 ? "Save & finish" : "Save & next");
+      const forms = {};
+      this.queue.forEach(fdkey => {
+        const row = saved[fdkey];
+        if (row){
+          this.savedIds.add(fdkey);
+          const marks = {};
+          try {
+            const parsed = row.inedible_marks ? JSON.parse(row.inedible_marks) : {};
+            Object.keys(parsed).forEach(fn => {
+              marks[fn] = parsed[fn].map(flat => {
+                const pts = [];
+                for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i+1]]);
+                return pts;
+              });
+            });
+          } catch(e){}
+          forms[fdkey] = {
+            grade: row.freshness_grade, spoilage: row.spoilage_level, ripeness: row.ripeness_stage,
+            defects: new Set((row.defect_type || "none").split(",").filter(Boolean)),
+            notes: row.notes || "", marks
+          };
+        } else {
+          forms[fdkey] = { grade: null, spoilage: null, ripeness: null, defects: new Set(["none"]), notes: "", marks: {} };
+        }
+      });
+      this.form = forms;
 
-  const saveExitBtn = el("button", {
-    class:"ghost", disabled: !ready || state.saving,
-    onclick: () => saveAndExit(rec)
-  }, "Save & continue later");
+      const firstUnanswered = this.queue.findIndex(k => !this.savedIds.has(k));
+      this.idx = firstUnanswered === -1 ? 0 : firstUnanswered;
+      this.screen = "rate";
+    },
 
-  const backBtn = el("button", {
-    class:"ghost", disabled: state.idx === 0,
-    onclick: () => { state.idx = Math.max(0, state.idx - 1); render(); }
-  }, "Back");
+    buildRow(rec){
+      const f = this.form[rec.fdkey];
+      const marksOut = {};
+      Object.keys(f.marks || {}).forEach(fn => {
+        if (f.marks[fn] && f.marks[fn].length) marksOut[fn] = f.marks[fn].map(s => s.flat());
+      });
+      return {
+        rater: this.rater.trim(), rater_id: sanitizeId(this.rater), track: this.track, fdkey: rec.fdkey,
+        species: rec.species, freshness_grade: f.grade, spoilage_level: f.spoilage, ripeness_stage: f.ripeness,
+        defect_type: Array.from(f.defects).join(","), notes: (f.notes || "").trim(),
+        inedible_marks: Object.keys(marksOut).length ? JSON.stringify(marksOut) : "",
+        submitted_at: new Date().toISOString(), synced: false
+      };
+    },
+    async saveRow(rec){
+      const row = this.buildRow(rec);
+      saveLocal(row);
+      let pushed = false;
+      if (githubConfigured()){
+        try { await syncRowToGithubWithRetry(row); pushed = true; row.synced = true; saveLocal(row); }
+        catch (e){ pushed = false; }
+      }
+      this.savedIds.add(rec.fdkey);
+      return pushed;
+    },
+    async submitCurrent(){
+      const rec = this.rec;
+      this.saving = true; this.saveMsg = "Saving…";
+      const pushed = await this.saveRow(rec);
+      this.saving = false;
+      this.saveMsg = !this.ghConfigured ? "Saved on this device."
+        : pushed ? "Saved to GitHub." : "Saved locally — will retry sync.";
+      if (this.idx < this.queue.length - 1){ this.idx += 1; this.saveMsg = ""; }
+      else { this.screen = "done"; }
+    },
+    async saveAndExit(){
+      const rec = this.rec;
+      this.saving = true; this.saveMsg = "Saving…";
+      const pushed = await this.saveRow(rec);
+      this.saving = false; this.saveMsg = "";
+      this.exitMsg = !this.ghConfigured ? "Progress saved on this device — pick the same name and set to pick up where you left off."
+        : pushed ? "Progress saved to GitHub — pick the same name and set to pick up where you left off."
+        : "Progress saved locally — will retry sync. Pick the same name and set to pick up where you left off.";
+      this.screen = "landing"; this.track = null;
+    },
+    async retrySyncAll(){
+      const pending = loadLocal(this.raterId).filter(r => !r.synced);
+      for (const row of pending){
+        try { await syncRowToGithubWithRetry(row); row.synced = true; saveLocal(row); }
+        catch (e){ break; }
+      }
+    },
+    downloadCsvNow(){ downloadCsv(this.raterId); },
+    rateAnother(){ this.screen = "landing"; this.track = null; this.exitMsg = ""; },
 
-  const raterId = sanitizeId(state.rater);
-  const pendingCount = loadLocal(raterId).filter(r => !r.synced).length;
-  const syncPill = githubConfigured()
-    ? el("span", {class:"sync-pill " + (pendingCount ? "pending" : "ok")},
-        pendingCount ? `${pendingCount} pending sync` : "synced")
-    : el("span", {class:"sync-pill pending"}, "local only");
-
-  return el("div", {class:"stack"},
-    el("div", {class:"topbar"},
-      el("div", {class:"stack", style:"gap:4px"},
-        el("div", {class:"eyebrow"}, state.track === "full" ? "Full grading" : "Spot-check"),
-        el("div", {class:"progress-bar", style:"width:160px"}, el("div", {class:"progress-fill", style:`width:${pct}%`}))
-      ),
-      el("div", {class:"row", style:"align-items:center; gap:8px"},
-        syncPill,
-        el("div", {class:"fdcode"}, `${state.idx+1} / ${total}` + (alreadySaved ? " · saved" : ""))
-      )
-    ),
-    el("div", {class:"card stack"},
-      el("div", {class:"row", style:"justify-content:space-between; align-items:center"},
-        el("h2", null, fmtSpecies(rec.species)),
-        el("span", {class:"badge"}, "no dates or IDs shown — grade only what you see")
-      ),
-      gallery,
-      el("div", {class:"kicker", style:"font-size:12.5px"}, "Tap a photo to open it full-size and draw over any part you personally wouldn't eat.")
-    ),
-    el("div", {class:"card stack"},
-      el("fieldset", null, el("legend", null, "Freshness grade", el("span",{class:"req"},"*")), gradeChoices),
-      el("div", {class:"divider"}),
-      el("fieldset", null, el("legend", null, "Spoilage level", el("span",{class:"req"},"*")), spoilChoices),
-      el("div", {class:"divider"}),
-      el("fieldset", null, el("legend", null, "Ripeness stage", el("span",{class:"req"},"*")), ripeChoices),
-      el("div", {class:"divider"}),
-      el("fieldset", null, el("legend", null, "Visible defects (optional, pick any)"), defectGrid),
-      el("div", {class:"divider"}),
-      el("fieldset", null, el("legend", null, "Notes"), notes)
-    ),
-    el("div", {class:"row", style:"justify-content:space-between; align-items:center"},
-      backBtn,
-      el("div", {class:"row", style:"gap:8px; align-items:center"},
-        saveExitBtn,
-        el("div", {class:"stack", style:"gap:2px; align-items:flex-end"},
-          el("div", {class:"save-note"}, state.saveMsg),
-          submitBtn
-        )
-      )
-    )
-  );
-}
-
-async function saveRow(rec){
-  const f = state.form[rec.fdkey];
-  const marksOut = {};
-  Object.keys(f.marks || {}).forEach(fn => {
-    if (f.marks[fn] && f.marks[fn].length) marksOut[fn] = f.marks[fn].map(s => s.flat());
-  });
-
-  const row = {
-    rater: state.rater.trim(),
-    rater_id: sanitizeId(state.rater),
-    track: state.track,
-    fdkey: rec.fdkey,
-    species: rec.species,
-    freshness_grade: f.grade,
-    spoilage_level: f.spoilage,
-    ripeness_stage: f.ripeness,
-    defect_type: Array.from(f.defects).join(","),
-    notes: (f.notes || "").trim(),
-    inedible_marks: Object.keys(marksOut).length ? JSON.stringify(marksOut) : "",
-    submitted_at: new Date().toISOString(),
-    synced: false
-  };
-
-  saveLocal(row);
-
-  let pushed = false;
-  if (githubConfigured()){
-    try { await syncRowToGithubWithRetry(row); pushed = true; row.synced = true; saveLocal(row); }
-    catch (e){ pushed = false; }
+    // ---------- lightbox / drawing ----------
+    openLightbox(fname){
+      this.lbFname = fname; this.lightboxOpen = true; this.activeStroke = null;
+      this.$nextTick(() => {
+        const img = this.$refs.lbImg;
+        if (img && img.complete) this.setupCanvas();
+      });
+    },
+    setupCanvas(){
+      const img = this.$refs.lbImg, canvas = this.$refs.lbCanvas;
+      if (!img || !canvas) return;
+      const w = img.clientWidth, h = img.clientHeight;
+      if (!w || !h) return;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      this.lbCtx = canvas.getContext("2d");
+      this.lbCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.lbCtx.lineCap = "round"; this.lbCtx.lineJoin = "round";
+      this.drawAll();
+    },
+    drawAll(){
+      const canvas = this.$refs.lbCanvas;
+      if (!this.lbCtx || !this.lbFname || !canvas) return;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      this.lbCtx.clearRect(0, 0, w, h);
+      this.lbCtx.strokeStyle = "rgba(214,64,45,0.85)";
+      this.lbCtx.lineWidth = Math.max(4, w * 0.02);
+      const f = this.currentForm;
+      if (!f) return;
+      const strokes = (f.marks[this.lbFname] || []).slice();
+      if (this.activeStroke) strokes.push(this.activeStroke);
+      strokes.forEach(stroke => {
+        if (stroke.length < 2) return;
+        this.lbCtx.beginPath();
+        stroke.forEach((p, i) => {
+          const x = p[0] * w, y = p[1] * h;
+          if (i === 0) this.lbCtx.moveTo(x, y); else this.lbCtx.lineTo(x, y);
+        });
+        this.lbCtx.stroke();
+      });
+    },
+    ptToNorm(e){
+      const canvas = this.$refs.lbCanvas;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width, y = (e.clientY - rect.top) / rect.height;
+      return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
+    },
+    onPointerDown(e){
+      e.preventDefault();
+      this.$refs.lbCanvas.setPointerCapture(e.pointerId);
+      this.activeStroke = [this.ptToNorm(e)];
+    },
+    onPointerMove(e){
+      if (!this.activeStroke) return;
+      this.activeStroke.push(this.ptToNorm(e));
+      this.drawAll();
+    },
+    onPointerUp(){
+      if (!this.activeStroke) return;
+      if (this.activeStroke.length >= 2){
+        const f = this.currentForm;
+        const arr = f.marks[this.lbFname] || (f.marks[this.lbFname] = []);
+        arr.push(this.activeStroke.map(p => [Math.round(p[0]*1000)/1000, Math.round(p[1]*1000)/1000]));
+      }
+      this.activeStroke = null;
+      this.drawAll();
+    },
+    undoStroke(){
+      const f = this.currentForm;
+      const arr = f.marks[this.lbFname];
+      if (arr && arr.length) arr.pop();
+      this.drawAll();
+    },
+    clearStrokes(){
+      const f = this.currentForm;
+      if (this.lbFname) f.marks[this.lbFname] = [];
+      this.drawAll();
+    },
+    closeLightbox(){ this.lightboxOpen = false; }
+  },
+  mounted(){
+    window.addEventListener("resize", () => { if (this.lightboxOpen) this.setupCanvas(); });
   }
-
-  state.savedIds.add(rec.fdkey);
-  return pushed;
-}
-
-async function submitCurrent(rec){
-  state.saving = true;
-  state.saveMsg = "Saving…";
-  render();
-
-  const pushed = await saveRow(rec);
-
-  state.saving = false;
-  state.saveMsg = !githubConfigured() ? "Saved on this device."
-    : pushed ? "Saved to GitHub." : "Saved locally — will retry sync.";
-  render();
-
-  if (state.idx < state.queue.length - 1){
-    state.idx += 1;
-    state.saveMsg = "";
-    render();
-  } else {
-    state.screen = "done";
-    render();
-  }
-}
-
-// Saves the current answer, same as "Save & next", but stops here instead
-// of advancing — the rater can close the tab or come back to the landing
-// screen and resume later without being forced through the rest of the set.
-async function saveAndExit(rec){
-  state.saving = true;
-  state.saveMsg = "Saving…";
-  render();
-
-  const pushed = await saveRow(rec);
-
-  state.saving = false;
-  state.saveMsg = "";
-  state.exitMsg = !githubConfigured() ? "Progress saved on this device — pick the same name and set to pick up where you left off."
-    : pushed ? "Progress saved to GitHub — pick the same name and set to pick up where you left off."
-    : "Progress saved locally — will retry sync. Pick the same name and set to pick up where you left off.";
-  state.screen = "landing";
-  state.track = null;
-  render();
-}
-
-function renderDone(){
-  const raterId = sanitizeId(state.rater);
-  const pendingCount = loadLocal(raterId).filter(r => !r.synced).length;
-  return el("div", {class:"card finish stack"},
-    el("h2", null, "All done"),
-    el("p", {class:"kicker"}, `Thank you, ${state.rater.trim()}. You rated ${state.queue.length} fruit-days on the ${state.track === "full" ? "full" : "spot-check"} track.`),
-    pendingCount
-      ? el("p", {class:"kicker"}, `${pendingCount} rating(s) haven't synced to GitHub yet (offline or the connection dropped). Try "Retry sync" before you close this tab, or keep the downloaded CSV as a backup.`)
-      : (githubConfigured() ? el("p", {class:"kicker"}, "All your ratings are synced to the results repo.") : null),
-    el("div", {class:"row", style:"justify-content:center"},
-      githubConfigured() ? el("button", {class:"ghost", onclick: async () => { await retrySync(); render(); }}, "Retry sync") : null,
-      el("button", {class:"ghost", onclick: () => downloadCsv(raterId)}, "Download CSV"),
-      el("button", {class:"primary", onclick: () => { state.screen = "landing"; state.track = null; state.exitMsg = ""; render(); }}, "Rate another set")
-    )
-  );
-}
-
-// ---------- lightbox / drawing ----------
-let lbCtx = null, lbFname = null, lbRec = null, lbForm = null, activeStroke = null;
-
-function openLightbox(fname, rec, f){
-  lbFname = fname; lbRec = rec; lbForm = f;
-  const img = document.getElementById("lightbox-img");
-  const canvas = document.getElementById("lightbox-canvas");
-  document.getElementById("lightbox").hidden = false;
-  img.onload = () => setupCanvas(img, canvas);
-  img.src = CONFIG.imageBaseUrl + fname;
-  if (img.complete) setupCanvas(img, canvas);
-}
-function setupCanvas(img, canvas){
-  const w = img.clientWidth, h = img.clientHeight;
-  if (!w || !h) return;
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-  lbCtx = canvas.getContext("2d");
-  lbCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  lbCtx.lineCap = "round"; lbCtx.lineJoin = "round";
-  drawAll();
-}
-function drawAll(){
-  const canvas = document.getElementById("lightbox-canvas");
-  if (!lbCtx || !lbFname) return;
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  lbCtx.clearRect(0, 0, w, h);
-  lbCtx.strokeStyle = "rgba(214,64,45,0.85)";
-  lbCtx.lineWidth = Math.max(4, w * 0.02);
-  const strokes = (lbForm.marks[lbFname] || []).slice();
-  if (activeStroke) strokes.push(activeStroke);
-  strokes.forEach(stroke => {
-    if (stroke.length < 2) return;
-    lbCtx.beginPath();
-    stroke.forEach((p, i) => {
-      const x = p[0] * w, y = p[1] * h;
-      if (i === 0) lbCtx.moveTo(x, y); else lbCtx.lineTo(x, y);
-    });
-    lbCtx.stroke();
-  });
-}
-function ptToNorm(e, canvas){
-  const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) / rect.width;
-  const y = (e.clientY - rect.top) / rect.height;
-  return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
-}
-function endStroke(){
-  if (!activeStroke) return;
-  if (activeStroke.length >= 2){
-    const arr = lbForm.marks[lbFname] || (lbForm.marks[lbFname] = []);
-    arr.push(activeStroke.map(p => [Math.round(p[0]*1000)/1000, Math.round(p[1]*1000)/1000]));
-  }
-  activeStroke = null;
-  drawAll();
-}
-function closeLightbox(){
-  document.getElementById("lightbox").hidden = true;
-  render();
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-  const canvas = document.getElementById("lightbox-canvas");
-  canvas.addEventListener("pointerdown", e => {
-    e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
-    activeStroke = [ptToNorm(e, canvas)];
-  });
-  canvas.addEventListener("pointermove", e => {
-    if (!activeStroke) return;
-    activeStroke.push(ptToNorm(e, canvas));
-    drawAll();
-  });
-  canvas.addEventListener("pointerup", endStroke);
-  canvas.addEventListener("pointercancel", endStroke);
-  canvas.addEventListener("pointerleave", () => { if (activeStroke) endStroke(); });
-
-  document.getElementById("lb-undo").addEventListener("click", e => {
-    e.stopPropagation();
-    const arr = lbForm.marks[lbFname];
-    if (arr && arr.length) arr.pop();
-    drawAll();
-  });
-  document.getElementById("lb-clear").addEventListener("click", e => {
-    e.stopPropagation();
-    if (lbFname) lbForm.marks[lbFname] = [];
-    drawAll();
-  });
-  document.getElementById("lb-done").addEventListener("click", e => {
-    e.stopPropagation();
-    closeLightbox();
-  });
-  document.querySelector(".lightbox-panel").addEventListener("click", e => e.stopPropagation());
-  document.getElementById("lightbox").addEventListener("click", closeLightbox);
-  window.addEventListener("resize", () => {
-    if (!document.getElementById("lightbox").hidden){
-      setupCanvas(document.getElementById("lightbox-img"), document.getElementById("lightbox-canvas"));
-    }
-  });
-
-  render();
-});
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.prod.js"></script>
+<script>
+  Vue.createApp(App).mount("#app");
 </script>
 </body>
 </html>

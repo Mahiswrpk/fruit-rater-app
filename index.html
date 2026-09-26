@@ -93,6 +93,12 @@
     border:1px solid var(--line); background:var(--surface-2); display:block;
   }
   .thumb.marked img{border-color:var(--warn); border-width:2px;}
+  .thumb-retry{
+    width:100%; aspect-ratio:3/4; border-radius:8px; cursor:pointer;
+    border:1px dashed var(--line); background:var(--surface-2); color:var(--ink-soft);
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-size:11px; line-height:1.4; padding:6px;
+  }
   .mark-dot{
     position:absolute; top:5px; right:5px; width:12px; height:12px; border-radius:99px;
     background:var(--warn); border:2px solid var(--surface); box-shadow:0 0 0 1px var(--warn);
@@ -135,6 +141,12 @@
   .lightbox-imgwrap{position:relative; display:inline-block; line-height:0; max-width:calc(100vw - 28px); max-height:calc(100vh - 110px);}
   .lightbox-imgwrap img{display:block; max-width:calc(100vw - 28px); max-height:calc(100vh - 110px); border-radius:8px;}
   .lightbox-imgwrap canvas{position:absolute; inset:0; width:100%; height:100%; touch-action:none; border-radius:8px; cursor:crosshair;}
+  .lightbox-retry{
+    width:min(80vw, 360px); aspect-ratio:3/4; border-radius:8px; cursor:pointer;
+    border:1px dashed rgba(255,255,255,.35); color:#dfe6e1; background:rgba(255,255,255,.06);
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    font-size:13.5px; line-height:1.4; padding:16px;
+  }
 
   .kicker{color:var(--ink-soft); font-size:14px; line-height:1.5;}
   .badge{
@@ -250,8 +262,9 @@ const CONFIG = {
         <span class="badge">no dates or IDs shown — grade only what you see</span>
       </div>
       <div class="gallery">
-        <div v-for="fname in rec.images" :key="fname" class="thumb" :class="{marked: hasMark(fname)}" @click="openLightbox(fname)">
-          <img :src="imgSrc(fname)" alt="fruit photo">
+        <div v-for="fname in rec.images" :key="fname" class="thumb" :class="{marked: hasMark(fname)}" @click="imgFailed[fname] ? retryImg(fname) : openLightbox(fname)">
+          <img v-if="!imgFailed[fname]" :src="imgSrc(fname)" alt="fruit photo" @error="onImgError(fname)">
+          <div v-else class="thumb-retry">Couldn't load<br>tap to retry</div>
           <span class="mark-dot" v-if="hasMark(fname)"></span>
         </div>
       </div>
@@ -339,7 +352,8 @@ const CONFIG = {
         </div>
       </div>
       <div class="lightbox-imgwrap">
-        <img ref="lbImg" :src="lbSrc" alt="fruit photo, full size" @load="setupCanvas">
+        <img v-if="!lbFailed" ref="lbImg" :src="lbSrc" alt="fruit photo, full size" @load="setupCanvas" @error="onLbImgError">
+        <div v-else class="lightbox-retry" @click.stop="retryLbImg">Couldn't load this photo — tap to retry</div>
         <canvas ref="lbCanvas"
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"
@@ -499,8 +513,12 @@ const App = {
       exitMsg: "",
       lightboxOpen: false,
       lbFname: null,
+      lbFailed: false,
+      lbRetries: 0,
       activeStroke: null,
       lbCtx: null,
+      imgRetries: {},
+      imgFailed: {},
       GRADES, SPOILAGE, DEFECTS, SPOT_INITIAL, SPOT_EXTRA
     };
   },
@@ -524,7 +542,11 @@ const App = {
     pendingCount(){ return loadLocal(this.raterId).filter(r => !r.synced).length; },
     syncPillText(){ return this.pendingCount ? `${this.pendingCount} pending sync` : "synced"; },
     syncPillClass(){ return this.pendingCount ? "pending" : "ok"; },
-    lbSrc(){ return this.lbFname ? CONFIG.imageBaseUrl + this.lbFname : ""; }
+    lbSrc(){
+      if (!this.lbFname) return "";
+      const n = this.lbRetries;
+      return CONFIG.imageBaseUrl + this.lbFname + (n ? ("?r=" + n) : "");
+    }
   },
   watch: {
     // Jump to top only on an actual screen or fruit change — never on a
@@ -534,7 +556,22 @@ const App = {
   },
   methods: {
     fmtSpecies, fmtRipe,
-    imgSrc(fname){ return CONFIG.imageBaseUrl + fname; },
+    imgSrc(fname){
+      const n = this.imgRetries[fname];
+      return CONFIG.imageBaseUrl + fname + (n ? ("?r=" + n) : "");
+    },
+    // A failed image load is almost always a transient network blip, not a
+    // missing file — retry a couple of times with backoff before giving up
+    // and showing a "tap to retry" placeholder instead of a dead icon.
+    onImgError(fname){
+      const attempt = (this.imgRetries[fname] || 0) + 1;
+      if (attempt > 3){ this.imgFailed[fname] = true; return; }
+      setTimeout(() => { this.imgRetries[fname] = attempt; }, 500 * attempt);
+    },
+    retryImg(fname){
+      this.imgFailed[fname] = false;
+      this.imgRetries[fname] = (this.imgRetries[fname] || 0) + 1;
+    },
     hasMark(fname){ const f = this.currentForm; return !!(f && f.marks[fname] && f.marks[fname].length); },
     onNameInput(e){ this.rater = e.target.value; this.exitMsg = ""; },
     toggleDefect(d){
@@ -683,6 +720,7 @@ const App = {
     // ---------- lightbox / drawing ----------
     openLightbox(fname){
       this.lbFname = fname; this.lightboxOpen = true; this.activeStroke = null;
+      this.lbFailed = false; this.lbRetries = 0;
       this.$nextTick(() => {
         const img = this.$refs.lbImg;
         if (img && img.complete) this.setupCanvas();
@@ -761,7 +799,16 @@ const App = {
       if (this.lbFname) f.marks[this.lbFname] = [];
       this.drawAll();
     },
-    closeLightbox(){ this.lightboxOpen = false; }
+    closeLightbox(){ this.lightboxOpen = false; },
+    onLbImgError(){
+      const attempt = this.lbRetries + 1;
+      if (attempt > 3){ this.lbFailed = true; return; }
+      setTimeout(() => { this.lbRetries = attempt; }, 500 * attempt);
+    },
+    retryLbImg(){
+      this.lbFailed = false;
+      this.lbRetries += 1;
+    }
   },
   mounted(){
     window.addEventListener("resize", () => { if (this.lightboxOpen) this.setupCanvas(); });

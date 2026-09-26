@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Blind Fruit Grader</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#f6f6f2;
+    --surface:#ffffff;
+    --surface-2:#eef1ec;
+    --ink:#1b241c;
+    --ink-soft:#5c6a5e;
+    --line:#dde3d9;
+    --accent:#2f6f4f;
+    --accent-ink:#ffffff;
+    --accent-soft:#e1eee5;
+    --warn:#b1502c;
+    --warn-soft:#f6e3d8;
+    --radius:14px;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#11150f; --surface:#181d16; --surface-2:#1f251c; --ink:#eef2ea; --ink-soft:#9db09f;
+      --line:#2b332a; --accent:#6fcf97; --accent-ink:#0d1a10; --accent-soft:#213328;
+      --warn:#e08a5e; --warn-soft:#3a2419; color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#11150f; --surface:#181d16; --surface-2:#1f251c; --ink:#eef2ea; --ink-soft:#9db09f;
+    --line:#2b332a; --accent:#6fcf97; --accent-ink:#0d1a10; --accent-soft:#213328;
+    --warn:#e08a5e; --warn-soft:#3a2419; color-scheme:dark;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    padding-inline:16px; padding-block:24px;
+  }
+  h1,h2,h3{font-family:"Fraunces","Georgia",serif; text-wrap:balance; margin:0;}
+  a{color:var(--accent);}
+  img{max-width:100%;}
+  [hidden]{display:none!important;}
+
+  .wrap{max-width:640px; margin:0 auto;}
+  .stack{display:flex; flex-direction:column; gap:16px;}
+  .row{display:flex; gap:10px; flex-wrap:wrap;}
+
+  .eyebrow{text-transform:uppercase; letter-spacing:.08em; font-size:11.5px; color:var(--ink-soft); font-weight:600;}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:18px;}
+
+  button{
+    font-family:inherit; font-size:15px; cursor:pointer;
+    border-radius:10px; border:1px solid var(--line);
+    background:var(--surface); color:var(--ink);
+    padding:11px 16px; transition:background .15s, border-color .15s, transform .1s;
+  }
+  button:active{transform:scale(.98);}
+  button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600;}
+  button.primary:disabled{opacity:.45; cursor:not-allowed;}
+  button.ghost{background:transparent;}
+  button:hover:not(:disabled){border-color:var(--accent);}
+
+  input[type=text], textarea{
+    font-family:inherit; font-size:15px; width:100%;
+    background:var(--surface-2); color:var(--ink);
+    border:1px solid var(--line); border-radius:10px; padding:11px 12px;
+  }
+  textarea{resize:vertical; min-height:64px;}
+
+  .track-pick{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  @media (max-width:520px){ .track-pick{grid-template-columns:1fr;} }
+  .track-card{
+    border:1.5px solid var(--line); border-radius:var(--radius);
+    padding:14px; cursor:pointer; background:var(--surface); text-align:left;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .track-card.selected{border-color:var(--accent); background:var(--accent-soft);}
+  .track-card b{font-size:15px;}
+  .track-card span{font-size:12.5px; color:var(--ink-soft); line-height:1.4;}
+
+  .progress-bar{height:6px; border-radius:99px; background:var(--surface-2); overflow:hidden;}
+  .progress-fill{height:100%; background:var(--accent); transition:width .2s;}
+
+  .gallery{display:grid; grid-template-columns:repeat(3,1fr); gap:6px;}
+  .thumb{position:relative; cursor:zoom-in; line-height:0;}
+  .thumb img{
+    width:100%; aspect-ratio:3/4; object-fit:cover; border-radius:8px;
+    border:1px solid var(--line); background:var(--surface-2); display:block;
+  }
+  .thumb.marked img{border-color:var(--warn); border-width:2px;}
+  .mark-dot{
+    position:absolute; top:5px; right:5px; width:12px; height:12px; border-radius:99px;
+    background:var(--warn); border:2px solid var(--surface); box-shadow:0 0 0 1px var(--warn);
+  }
+
+  fieldset{border:none; margin:0; padding:0;}
+  legend{font-weight:600; font-size:13.5px; margin-bottom:8px; padding:0; display:flex; align-items:center; gap:6px;}
+  .req{color:var(--warn); font-weight:700;}
+
+  .choice-grid{display:flex; gap:8px; flex-wrap:wrap;}
+  .choice{
+    border:1.5px solid var(--line); border-radius:10px; padding:9px 13px;
+    background:var(--surface); font-size:14px; cursor:pointer; color:var(--ink);
+  }
+  .choice.selected{border-color:var(--accent); background:var(--accent-soft); font-weight:600;}
+  .choice small{display:block; font-weight:400; color:var(--ink-soft); font-size:11px; margin-top:2px;}
+
+  .grade-A{--dot:#3f8c5b;} .grade-B{--dot:#7fae3f;} .grade-C{--dot:#c98f2b;} .grade-D{--dot:#b1502c;}
+  .dot{width:9px; height:9px; border-radius:99px; background:var(--dot); display:inline-block; margin-right:6px;}
+
+  details.rubric{border:1px solid var(--line); border-radius:12px; padding:12px 14px; background:var(--surface-2);}
+  details.rubric summary{cursor:pointer; font-weight:600; font-size:13.5px;}
+  details.rubric ul{margin:10px 0 2px; padding-left:18px; font-size:13px; color:var(--ink-soft); line-height:1.5;}
+
+  .topbar{
+    position:sticky; top:0; z-index:5; background:var(--bg); padding-block:10px 6px; margin-bottom:2px;
+    display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;
+  }
+  .fdcode{font-size:12px; color:var(--ink-soft);}
+
+  .lightbox{
+    position:fixed; inset:0; background:rgba(0,0,0,.88); display:flex;
+    align-items:center; justify-content:center; z-index:50; padding:14px;
+  }
+  .lightbox[hidden]{display:none;}
+  .lightbox-panel{display:flex; flex-direction:column; gap:10px; align-items:center; max-width:100%; max-height:100%;}
+  .lightbox-bar{display:flex; justify-content:space-between; align-items:center; gap:10px; width:100%; flex-wrap:wrap;}
+  .lightbox-hint{color:#dfe6e1; font-size:12.5px; max-width:220px; line-height:1.4;}
+  .lightbox-bar button{padding:8px 12px; font-size:13.5px;}
+  .lightbox-bar button.ghost{background:rgba(255,255,255,.08); color:#fff; border-color:rgba(255,255,255,.25);}
+  .lightbox-imgwrap{position:relative; display:inline-block; line-height:0; max-width:calc(100vw - 28px); max-height:calc(100vh - 110px);}
+  .lightbox-imgwrap img{display:block; max-width:calc(100vw - 28px); max-height:calc(100vh - 110px); border-radius:8px;}
+  .lightbox-imgwrap canvas{position:absolute; inset:0; width:100%; height:100%; touch-action:none; border-radius:8px; cursor:crosshair;}
+
+  .kicker{color:var(--ink-soft); font-size:14px; line-height:1.5;}
+  .badge{
+    display:inline-flex; align-items:center; gap:5px; font-size:12px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:99px;
+    padding:4px 10px; color:var(--ink-soft);
+  }
+  .finish{text-align:center; padding-block:40px;}
+  .divider{height:1px; background:var(--line); margin-block:4px;}
+  .defect-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  @media (max-width:480px){.defect-grid{grid-template-columns:1fr;}}
+  .save-note{font-size:12.5px; color:var(--ink-soft); min-height:16px;}
+  .sync-pill{font-size:11.5px; padding:3px 9px; border-radius:99px; border:1px solid var(--line);}
+  .sync-pill.ok{color:var(--accent); border-color:var(--accent);}
+  .sync-pill.pending{color:var(--warn); border-color:var(--warn);}
+</style>
+</head>
+<body>
+
+<!--
+  =====================================================================
+  CONFIG — edit these two things before you deploy, nothing else needs
+  to change.
+  =====================================================================
+-->
+<script>
+const CONFIG = {
+  // Where the photos live. Default assumes this index.html and an
+  // "images/" folder full of .jpg files sit in the SAME GitHub repo,
+  // served by GitHub Pages — so a relative path just works, loads fast,
+  // and needs no auth. If your images live in a different repo, point
+  // this at that repo's raw content instead, e.g.:
+  // "https://raw.githubusercontent.com/<you>/<images-repo>/main/images/"
+  imageBaseUrl: "images/",
+
+  // Where responses get committed automatically. Each rater's answers
+  // are written to "<responsesPath>/<rater_id>.csv" in this repo, one
+  // row per fruit-day, opens straight in Excel.
+  //
+  // SECURITY — read this before filling in `token`:
+  // This token lives in the page's own source, so anyone who opens this
+  // page and looks at "view source" or the browser devtools can read it.
+  // That is unavoidable for a page with no server of its own. Make the
+  // damage bounded if that happens:
+  //   1. Create a GitHub *fine-grained* personal access token (not a
+  //      classic one) at github.com/settings/personal-access-tokens
+  //   2. Scope it to ONLY this one responses repository
+  //   3. Give it ONLY "Contents: Read and write" — no other permission
+  //   4. Set a short expiry (e.g. 90 days) and just regenerate it later
+  // With that scoping, the worst a leaked token can do is write junk
+  // files into this one low-stakes repo — nothing else on your account
+  // is reachable with it. You can revoke or rotate it any time from
+  // GitHub settings with zero code changes here.
+  responsesRepo: {
+    owner: "YOUR_GITHUB_USERNAME",
+    repo: "YOUR_RESPONSES_REPO",
+    branch: "main",
+    responsesPath: "responses",
+    token: ""  // paste your fine-grained token here, or leave blank to
+               // disable auto-push (ratings still save locally and can
+               // be downloaded as CSV any time)
+  }
+};
+</script>
+
+<div class="wrap" id="app"></div>
+
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lightbox-panel">
+    <div class="lightbox-bar">
+      <div class="lightbox-hint">Draw over any part you personally wouldn't eat — optional, helps flag exactly where.</div>
+      <div class="row" style="gap:6px">
+        <button type="button" class="ghost" id="lb-undo">Undo</button>
+        <button type="button" class="ghost" id="lb-clear">Clear</button>
+        <button type="button" class="primary" id="lb-done">Done</button>
+      </div>
+    </div>
+    <div class="lightbox-imgwrap" id="lightbox-imgwrap">
+      <img id="lightbox-img" alt="fruit photo, full size">
+      <canvas id="lightbox-canvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+const MANIFEST = [{"fdkey":"BANANA1_D2","fruit_id":"BANANA1","species":"banana","storage_day":2,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"5-yellow_green_tips","images":["BANANA1_RGB_DAY2_TOP.jpg","BANANA1_RGB_DAY2_SIDE1.jpg","BANANA1_RGB_DAY2_SIDE2.jpg"]},{"fdkey":"BANANA1_D3","fruit_id":"BANANA1","species":"banana","storage_day":3,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"6-all_yellow","images":["BANANA1_RGB_DAY3_TOP.jpg","BANANA1_RGB_DAY3_SIDE1.jpg","BANANA1_RGB_DAY3_SIDE2.jpg"]},{"fdkey":"BANANA1_D5","fruit_id":"BANANA1","species":"banana","storage_day":5,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA1_RGB_DAY5_TOP.jpg","BANANA1_RGB_DAY5_SIDE1.jpg","BANANA1_RGB_DAY5_SIDE2.jpg"]},{"fdkey":"BANANA1_D6","fruit_id":"BANANA1","species":"banana","storage_day":6,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA1_RGB_DAY6_SIDE1.jpg","BANANA1_RGB_DAY6_SIDE2.jpg","BANANA1_RGB_DAY6_BOTTOM.jpg"]},{"fdkey":"BANANA1_D7","fruit_id":"BANANA1","species":"banana","storage_day":7,"track":"spot_check","freshness_grade":"D","spoilage_level":"severely_spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA1_RGB_DAY7_SIDE1.jpg","BANANA1_RGB_DAY7_SIDE2.jpg"]},{"fdkey":"BANANA2_D2","fruit_id":"BANANA2","species":"banana","storage_day":2,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"5-yellow_green_tips","images":["BANANA2_RGB_DAY2_TOP.jpg","BANANA2_RGB_DAY2_SIDE1.jpg","BANANA2_RGB_DAY2_SIDE2.jpg"]},{"fdkey":"BANANA2_D3","fruit_id":"BANANA2","species":"banana","storage_day":3,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"6-all_yellow","images":["BANANA2_RGB_DAY3_TOP.jpg","BANANA2_RGB_DAY3_SIDE1.jpg","BANANA2_RGB_DAY3_SIDE2.jpg"]},{"fdkey":"BANANA2_D5","fruit_id":"BANANA2","species":"banana","storage_day":5,"track":"full_only","freshness_grade":"C","spoilage_level":"mild_decline","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA2_RGB_DAY5_TOP.jpg","BANANA2_RGB_DAY5_SIDE1.jpg","BANANA2_RGB_DAY5_SIDE2.jpg"]},{"fdkey":"BANANA2_D6","fruit_id":"BANANA2","species":"banana","storage_day":6,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA2_RGB_DAY6_TOP.jpg","BANANA2_RGB_DAY6_SIDE1.jpg","BANANA2_RGB_DAY6_SIDE2.jpg"]},{"fdkey":"BANANA2_D7","fruit_id":"BANANA2","species":"banana","storage_day":7,"track":"full_only","freshness_grade":"D","spoilage_level":"severely_spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA2_RGB_DAY7_SIDE1.jpg","BANANA2_RGB_DAY7_SIDE2.jpg"]},{"fdkey":"BANANA3_D2","fruit_id":"BANANA3","species":"banana","storage_day":2,"track":"spot_check","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"5-yellow_green_tips","images":["BANANA3_RGB_DAY2_TOP.jpg","BANANA3_RGB_DAY2_SIDE1.jpg","BANANA3_RGB_DAY2_SIDE2.jpg"]},{"fdkey":"BANANA3_D3","fruit_id":"BANANA3","species":"banana","storage_day":3,"track":"full_only","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"6-all_yellow","images":["BANANA3_RGB_DAY3_TOP.jpg","BANANA3_RGB_DAY3_SIDE1.jpg","BANANA3_RGB_DAY3_SIDE2.jpg"]},{"fdkey":"BANANA3_D5","fruit_id":"BANANA3","species":"banana","storage_day":5,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA3_RGB_DAY5_TOP.jpg","BANANA3_RGB_DAY5_SIDE1.jpg","BANANA3_RGB_DAY5_SIDE2.jpg"]},{"fdkey":"BANANA3_D6","fruit_id":"BANANA3","species":"banana","storage_day":6,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA3_RGB_DAY6_TOP.jpg","BANANA3_RGB_DAY6_SIDE1.jpg","BANANA3_RGB_DAY6_SIDE2.jpg"]},{"fdkey":"BANANA3_D7","fruit_id":"BANANA3","species":"banana","storage_day":7,"track":"full_only","freshness_grade":"D","spoilage_level":"severely_spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA3_RGB_DAY7_SIDE1.jpg","BANANA3_RGB_DAY7_SIDE2.jpg"]},{"fdkey":"BANANA4_D2","fruit_id":"BANANA4","species":"banana","storage_day":2,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"5-yellow_green_tips","images":["BANANA4_RGB_DAY2_TOP.jpg","BANANA4_RGB_DAY2_SIDE1.jpg","BANANA4_RGB_DAY2_SIDE2.jpg"]},{"fdkey":"BANANA4_D3","fruit_id":"BANANA4","species":"banana","storage_day":3,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"6-all_yellow","images":["BANANA4_RGB_DAY3_TOP.jpg","BANANA4_RGB_DAY3_SIDE1.jpg","BANANA4_RGB_DAY3_SIDE2.jpg"]},{"fdkey":"BANANA4_D5","fruit_id":"BANANA4","species":"banana","storage_day":5,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA4_RGB_DAY5_TOP.jpg","BANANA4_RGB_DAY5_SIDE1.jpg","BANANA4_RGB_DAY5_SIDE2.jpg"]},{"fdkey":"BANANA4_D6","fruit_id":"BANANA4","species":"banana","storage_day":6,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA4_RGB_DAY6_TOP.jpg","BANANA4_RGB_DAY6_SIDE1.jpg","BANANA4_RGB_DAY6_SIDE2.jpg"]},{"fdkey":"BANANA4_D7","fruit_id":"BANANA4","species":"banana","storage_day":7,"track":"full_only","freshness_grade":"D","spoilage_level":"severely_spoiled","ripeness_stage":"7-yellow_flecked_brown","images":["BANANA4_RGB_DAY7_SIDE2.jpg"]},{"fdkey":"GUAVA1_D2","fruit_id":"GUAVA1","species":"guava","storage_day":2,"track":"spot_check","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"2-light_green_mature","images":["GUAVA1_RGB_DAY2_TOP.jpg","GUAVA1_RGB_DAY2_SIDE1.jpg","GUAVA1_RGB_DAY2_SIDE2.jpg","GUAVA1_RGB_DAY2_SIDE3.jpg","GUAVA1_RGB_DAY2_SIDE4.jpg","GUAVA1_RGB_DAY2_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D3","fruit_id":"GUAVA1","species":"guava","storage_day":3,"track":"full_only","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"2-light_green_mature","images":["GUAVA1_RGB_DAY3_TOP.jpg","GUAVA1_RGB_DAY3_SIDE1.jpg","GUAVA1_RGB_DAY3_SIDE2.jpg","GUAVA1_RGB_DAY3_SIDE3.jpg","GUAVA1_RGB_DAY3_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D5","fruit_id":"GUAVA1","species":"guava","storage_day":5,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA1_RGB_DAY5_TOP.jpg","GUAVA1_RGB_DAY5_SIDE1.jpg","GUAVA1_RGB_DAY5_SIDE2.jpg","GUAVA1_RGB_DAY5_SIDE3.jpg","GUAVA1_RGB_DAY5_SIDE4.jpg","GUAVA1_RGB_DAY5_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D6","fruit_id":"GUAVA1","species":"guava","storage_day":6,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA1_RGB_DAY6_TOP.jpg","GUAVA1_RGB_DAY6_SIDE1.jpg","GUAVA1_RGB_DAY6_SIDE2.jpg","GUAVA1_RGB_DAY6_SIDE3.jpg","GUAVA1_RGB_DAY6_SIDE4.jpg","GUAVA1_RGB_DAY6_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D7","fruit_id":"GUAVA1","species":"guava","storage_day":7,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA1_RGB_DAY7_TOP.jpg","GUAVA1_RGB_DAY7_SIDE1.jpg","GUAVA1_RGB_DAY7_SIDE2.jpg","GUAVA1_RGB_DAY7_SIDE3.jpg","GUAVA1_RGB_DAY7_SIDE4.jpg","GUAVA1_RGB_DAY7_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D9","fruit_id":"GUAVA1","species":"guava","storage_day":9,"track":"full_only","freshness_grade":"C","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA1_RGB_DAY9_TOP.jpg","GUAVA1_RGB_DAY9_SIDE1.jpg","GUAVA1_RGB_DAY9_SIDE2.jpg","GUAVA1_RGB_DAY9_SIDE3.jpg","GUAVA1_RGB_DAY9_SIDE4.jpg","GUAVA1_RGB_DAY9_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D10","fruit_id":"GUAVA1","species":"guava","storage_day":10,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA1_RGB_DAY10_TOP.jpg","GUAVA1_RGB_DAY10_SIDE1.jpg","GUAVA1_RGB_DAY10_SIDE2.jpg","GUAVA1_RGB_DAY10_SIDE3.jpg","GUAVA1_RGB_DAY10_SIDE4.jpg","GUAVA1_RGB_DAY10_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D12","fruit_id":"GUAVA1","species":"guava","storage_day":12,"track":"spot_check","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA1_RGB_DAY12_TOP.jpg","GUAVA1_RGB_DAY12_SIDE1.jpg","GUAVA1_RGB_DAY12_SIDE2.jpg","GUAVA1_RGB_DAY12_SIDE3.jpg","GUAVA1_RGB_DAY12_SIDE4.jpg","GUAVA1_RGB_DAY12_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D13","fruit_id":"GUAVA1","species":"guava","storage_day":13,"track":"spot_check","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA1_RGB_DAY13_TOP.jpg","GUAVA1_RGB_DAY13_SIDE1.jpg","GUAVA1_RGB_DAY13_SIDE2.jpg","GUAVA1_RGB_DAY13_SIDE3.jpg","GUAVA1_RGB_DAY13_SIDE4.jpg","GUAVA1_RGB_DAY13_BOTTOM.jpg"]},{"fdkey":"GUAVA1_D14","fruit_id":"GUAVA1","species":"guava","storage_day":14,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA1_RGB_DAY14_TOP.jpg","GUAVA1_RGB_DAY14_SIDE1.jpg","GUAVA1_RGB_DAY14_SIDE2.jpg","GUAVA1_RGB_DAY14_SIDE3.jpg","GUAVA1_RGB_DAY14_SIDE4.jpg","GUAVA1_RGB_DAY14_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D2","fruit_id":"GUAVA2","species":"guava","storage_day":2,"track":"spot_check","freshness_grade":"A","spoilage_level":"fresh","ripeness_stage":"2-light_green_mature","images":["GUAVA2_RGB_DAY2_TOP.jpg","GUAVA2_RGB_DAY2_SIDE1.jpg","GUAVA2_RGB_DAY2_SIDE2.jpg","GUAVA2_RGB_DAY2_SIDE3.jpg","GUAVA2_RGB_DAY2_SIDE4.jpg","GUAVA2_RGB_DAY2_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D3","fruit_id":"GUAVA2","species":"guava","storage_day":3,"track":"spot_check","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"3-green_yellow_turning","images":["GUAVA2_RGB_DAY3_TOP.jpg","GUAVA2_RGB_DAY3_SIDE1.jpg","GUAVA2_RGB_DAY3_SIDE2.jpg","GUAVA2_RGB_DAY3_SIDE3.jpg","GUAVA2_RGB_DAY3_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D5","fruit_id":"GUAVA2","species":"guava","storage_day":5,"track":"full_only","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"3-green_yellow_turning","images":["GUAVA2_RGB_DAY5_TOP.jpg","GUAVA2_RGB_DAY5_SIDE1.jpg","GUAVA2_RGB_DAY5_SIDE2.jpg","GUAVA2_RGB_DAY5_SIDE3.jpg","GUAVA2_RGB_DAY5_SIDE4.jpg","GUAVA2_RGB_DAY5_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D6","fruit_id":"GUAVA2","species":"guava","storage_day":6,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA2_RGB_DAY6_TOP.jpg","GUAVA2_RGB_DAY6_SIDE1.jpg","GUAVA2_RGB_DAY6_SIDE2.jpg","GUAVA2_RGB_DAY6_SIDE3.jpg","GUAVA2_RGB_DAY6_SIDE4.jpg","GUAVA2_RGB_DAY6_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D7","fruit_id":"GUAVA2","species":"guava","storage_day":7,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA2_RGB_DAY7_TOP.jpg","GUAVA2_RGB_DAY7_SIDE1.jpg","GUAVA2_RGB_DAY7_SIDE2.jpg","GUAVA2_RGB_DAY7_SIDE3.jpg","GUAVA2_RGB_DAY7_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D9","fruit_id":"GUAVA2","species":"guava","storage_day":9,"track":"full_only","freshness_grade":"C","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA2_RGB_DAY9_TOP.jpg","GUAVA2_RGB_DAY9_SIDE1.jpg","GUAVA2_RGB_DAY9_SIDE2.jpg","GUAVA2_RGB_DAY9_SIDE3.jpg","GUAVA2_RGB_DAY9_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D10","fruit_id":"GUAVA2","species":"guava","storage_day":10,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"4-yellow_ripe","images":["GUAVA2_RGB_DAY10_TOP.jpg","GUAVA2_RGB_DAY10_SIDE1.jpg","GUAVA2_RGB_DAY10_SIDE2.jpg","GUAVA2_RGB_DAY10_SIDE3.jpg","GUAVA2_RGB_DAY10_SIDE4.jpg","GUAVA2_RGB_DAY10_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D12","fruit_id":"GUAVA2","species":"guava","storage_day":12,"track":"spot_check","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA2_RGB_DAY12_TOP.jpg","GUAVA2_RGB_DAY12_SIDE1.jpg","GUAVA2_RGB_DAY12_SIDE2.jpg","GUAVA2_RGB_DAY12_SIDE3.jpg","GUAVA2_RGB_DAY12_SIDE4.jpg","GUAVA2_RGB_DAY12_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D13","fruit_id":"GUAVA2","species":"guava","storage_day":13,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA2_RGB_DAY13_TOP.jpg","GUAVA2_RGB_DAY13_SIDE1.jpg","GUAVA2_RGB_DAY13_SIDE2.jpg","GUAVA2_RGB_DAY13_SIDE3.jpg","GUAVA2_RGB_DAY13_BOTTOM.jpg"]},{"fdkey":"GUAVA2_D14","fruit_id":"GUAVA2","species":"guava","storage_day":14,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA2_RGB_DAY14_TOP.jpg","GUAVA2_RGB_DAY14_SIDE1.jpg","GUAVA2_RGB_DAY14_SIDE2.jpg","GUAVA2_RGB_DAY14_SIDE3.jpg","GUAVA2_RGB_DAY14_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D2","fruit_id":"GUAVA3","species":"guava","storage_day":2,"track":"full_only","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"2-light_green_mature","images":["GUAVA3_RGB_DAY2_TOP.jpg","GUAVA3_RGB_DAY2_SIDE1.jpg","GUAVA3_RGB_DAY2_SIDE2.jpg","GUAVA3_RGB_DAY2_SIDE3.jpg","GUAVA3_RGB_DAY2_SIDE4.jpg","GUAVA3_RGB_DAY2_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D3","fruit_id":"GUAVA3","species":"guava","storage_day":3,"track":"spot_check","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"3-green_yellow_turning","images":["GUAVA3_RGB_DAY3_TOP.jpg","GUAVA3_RGB_DAY3_SIDE1.jpg","GUAVA3_RGB_DAY3_SIDE2.jpg","GUAVA3_RGB_DAY3_SIDE3.jpg","GUAVA3_RGB_DAY3_SIDE4.jpg","GUAVA3_RGB_DAY3_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D5","fruit_id":"GUAVA3","species":"guava","storage_day":5,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA3_RGB_DAY5_TOP.jpg","GUAVA3_RGB_DAY5_SIDE1.jpg","GUAVA3_RGB_DAY5_SIDE2.jpg","GUAVA3_RGB_DAY5_SIDE3.jpg","GUAVA3_RGB_DAY5_SIDE4.jpg","GUAVA3_RGB_DAY5_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D6","fruit_id":"GUAVA3","species":"guava","storage_day":6,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA3_RGB_DAY6_TOP.jpg","GUAVA3_RGB_DAY6_SIDE1.jpg","GUAVA3_RGB_DAY6_SIDE2.jpg","GUAVA3_RGB_DAY6_SIDE3.jpg","GUAVA3_RGB_DAY6_SIDE4.jpg","GUAVA3_RGB_DAY6_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D7","fruit_id":"GUAVA3","species":"guava","storage_day":7,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA3_RGB_DAY7_TOP.jpg","GUAVA3_RGB_DAY7_SIDE1.jpg","GUAVA3_RGB_DAY7_SIDE2.jpg","GUAVA3_RGB_DAY7_SIDE3.jpg","GUAVA3_RGB_DAY7_SIDE4.jpg","GUAVA3_RGB_DAY7_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D9","fruit_id":"GUAVA3","species":"guava","storage_day":9,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA3_RGB_DAY9_TOP.jpg","GUAVA3_RGB_DAY9_SIDE1.jpg","GUAVA3_RGB_DAY9_SIDE2.jpg","GUAVA3_RGB_DAY9_SIDE3.jpg","GUAVA3_RGB_DAY9_SIDE4.jpg","GUAVA3_RGB_DAY9_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D10","fruit_id":"GUAVA3","species":"guava","storage_day":10,"track":"full_only","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA3_RGB_DAY10_TOP.jpg","GUAVA3_RGB_DAY10_SIDE1.jpg","GUAVA3_RGB_DAY10_SIDE2.jpg","GUAVA3_RGB_DAY10_SIDE3.jpg","GUAVA3_RGB_DAY10_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D12","fruit_id":"GUAVA3","species":"guava","storage_day":12,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA3_RGB_DAY12_TOP.jpg","GUAVA3_RGB_DAY12_SIDE1.jpg","GUAVA3_RGB_DAY12_SIDE2.jpg","GUAVA3_RGB_DAY12_SIDE3.jpg","GUAVA3_RGB_DAY12_SIDE4.jpg","GUAVA3_RGB_DAY12_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D13","fruit_id":"GUAVA3","species":"guava","storage_day":13,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA3_RGB_DAY13_TOP.jpg","GUAVA3_RGB_DAY13_SIDE1.jpg","GUAVA3_RGB_DAY13_SIDE2.jpg","GUAVA3_RGB_DAY13_SIDE3.jpg","GUAVA3_RGB_DAY13_SIDE4.jpg","GUAVA3_RGB_DAY13_BOTTOM.jpg"]},{"fdkey":"GUAVA3_D14","fruit_id":"GUAVA3","species":"guava","storage_day":14,"track":"spot_check","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA3_RGB_DAY14_TOP.jpg","GUAVA3_RGB_DAY14_SIDE1.jpg","GUAVA3_RGB_DAY14_SIDE2.jpg","GUAVA3_RGB_DAY14_SIDE3.jpg","GUAVA3_RGB_DAY14_BOTTOM.jpg"]},{"fdkey":"GUAVA4_D2","fruit_id":"GUAVA4","species":"guava","storage_day":2,"track":"full_only","freshness_grade":"B","spoilage_level":"fresh","ripeness_stage":"2-light_green_mature","images":["GUAVA4_RGB_DAY2_TOP.jpg","GUAVA4_RGB_DAY2_SIDE1.jpg","GUAVA4_RGB_DAY2_SIDE2.jpg","GUAVA4_RGB_DAY2_SIDE3.jpg","GUAVA4_RGB_DAY2_SIDE4.jpg","GUAVA4_RGB_DAY2_BOTTOM.jpg"]},{"fdkey":"GUAVA4_D3","fruit_id":"GUAVA4","species":"guava","storage_day":3,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"3-green_yellow_turning","images":["GUAVA4_RGB_DAY3_TOP.jpg","GUAVA4_RGB_DAY3_SIDE1.jpg","GUAVA4_RGB_DAY3_SIDE2.jpg","GUAVA4_RGB_DAY3_SIDE3.jpg","GUAVA4_RGB_DAY3_SIDE4.jpg","GUAVA4_RGB_DAY3_BOTTOM.jpg"]},{"fdkey":"GUAVA4_D5","fruit_id":"GUAVA4","species":"guava","storage_day":5,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"3-green_yellow_turning","images":["GUAVA4_RGB_DAY5_TOP.jpg","GUAVA4_RGB_DAY5_SIDE1.jpg","GUAVA4_RGB_DAY5_SIDE2.jpg","GUAVA4_RGB_DAY5_SIDE3.jpg","GUAVA4_RGB_DAY5_SIDE4.jpg","GUAVA4_RGB_DAY5_BOTTOM.jpg"]},{"fdkey":"GUAVA4_D6","fruit_id":"GUAVA4","species":"guava","storage_day":6,"track":"spot_check","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA4_RGB_DAY6_TOP.jpg","GUAVA4_RGB_DAY6_SIDE1.jpg","GUAVA4_RGB_DAY6_SIDE2.jpg","GUAVA4_RGB_DAY6_SIDE3.jpg","GUAVA4_RGB_DAY6_SIDE4.jpg","GUAVA4_RGB_DAY6_BOTTOM.jpg"]},{"fdkey":"GUAVA4_D7","fruit_id":"GUAVA4","species":"guava","storage_day":7,"track":"full_only","freshness_grade":"C","spoilage_level":"fresh","ripeness_stage":"4-yellow_ripe","images":["GUAVA4_RGB_DAY7_TOP.jpg","GUAVA4_RGB_DAY7_SIDE1.jpg","GUAVA4_RGB_DAY7_SIDE2.jpg","GUAVA4_RGB_DAY7_SIDE3.jpg","GUAVA4_RGB_DAY7_SIDE4.jpg"]},{"fdkey":"GUAVA4_D9","fruit_id":"GUAVA4","species":"guava","storage_day":9,"track":"full_only","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA4_RGB_DAY9_TOP.jpg","GUAVA4_RGB_DAY9_SIDE1.jpg","GUAVA4_RGB_DAY9_SIDE2.jpg","GUAVA4_RGB_DAY9_SIDE3.jpg","GUAVA4_RGB_DAY9_SIDE4.jpg"]},{"fdkey":"GUAVA4_D10","fruit_id":"GUAVA4","species":"guava","storage_day":10,"track":"spot_check","freshness_grade":"D","spoilage_level":"mild_decline","ripeness_stage":"4-yellow_ripe","images":["GUAVA4_RGB_DAY10_TOP.jpg","GUAVA4_RGB_DAY10_SIDE1.jpg","GUAVA4_RGB_DAY10_SIDE2.jpg","GUAVA4_RGB_DAY10_SIDE3.jpg","GUAVA4_RGB_DAY10_SIDE4.jpg"]},{"fdkey":"GUAVA4_D12","fruit_id":"GUAVA4","species":"guava","storage_day":12,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA4_RGB_DAY12_TOP.jpg","GUAVA4_RGB_DAY12_SIDE1.jpg","GUAVA4_RGB_DAY12_SIDE2.jpg","GUAVA4_RGB_DAY12_SIDE3.jpg","GUAVA4_RGB_DAY12_SIDE4.jpg"]},{"fdkey":"GUAVA4_D13","fruit_id":"GUAVA4","species":"guava","storage_day":13,"track":"spot_check","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA4_RGB_DAY13_TOP.jpg","GUAVA4_RGB_DAY13_SIDE1.jpg","GUAVA4_RGB_DAY13_SIDE2.jpg","GUAVA4_RGB_DAY13_SIDE3.jpg","GUAVA4_RGB_DAY13_SIDE4.jpg","GUAVA4_RGB_DAY13_BOTTOM.jpg"]},{"fdkey":"GUAVA4_D14","fruit_id":"GUAVA4","species":"guava","storage_day":14,"track":"full_only","freshness_grade":"D","spoilage_level":"spoiled","ripeness_stage":"5-deep_yellow_soft_overripe","images":["GUAVA4_RGB_DAY14_TOP.jpg","GUAVA4_RGB_DAY14_SIDE1.jpg","GUAVA4_RGB_DAY14_SIDE2.jpg","GUAVA4_RGB_DAY14_SIDE3.jpg","GUAVA4_RGB_DAY14_BOTTOM.jpg"]}];
+
+const RIPENESS = {
+  banana: ["5-yellow_green_tips","6-all_yellow","7-yellow_flecked_brown"],
+  guava: ["2-light_green_mature","3-green_yellow_turning","4-yellow_ripe","5-deep_yellow_soft_overripe"]
+};
+const GRADES = [
+  {v:"A", label:"A — pristine", hint:"uniform colour, no wrinkling, no marks"},
+  {v:"B", label:"B — sound", hint:"intact, slight ripening progression"},
+  {v:"C", label:"C — worn", hint:"intact but bruised or discoloured patches"},
+  {v:"D", label:"D — deteriorated", hint:"extensive discolouration, dents, soft spots"}
+];
+const SPOILAGE = [
+  {v:"fresh", label:"Fresh"},
+  {v:"mild_decline", label:"Mild decline"},
+  {v:"spoiled", label:"Spoiled"},
+  {v:"severely_spoiled", label:"Severely spoiled"}
+];
+const DEFECTS = [
+  "none","scar/russet","scratch/cut/abrasion","dent/impact","bruise",
+  "discolouration/browning","softening/wrinkling","mould","rot/leakage"
+];
+const CSV_COLUMNS = [
+  "rater","rater_id","track","fdkey","species","freshness_grade","spoilage_level",
+  "ripeness_stage","defect_type","notes","inedible_marks","submitted_at"
+];
+
+function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+function fmtRipe(r){ return r.replace(/^\d+-/, "").replace(/_/g, " "); }
+function sanitizeId(s){ return (s||"").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g,""); }
+
+// ---------- local storage (per-device backup + resume) ----------
+function localKey(raterId){ return "fruitgrader_rows_" + raterId; }
+function loadLocal(raterId){
+  try { return JSON.parse(localStorage.getItem(localKey(raterId)) || "[]"); }
+  catch(e){ return []; }
+}
+function saveLocal(row){
+  try {
+    const key = localKey(row.rater_id);
+    const rows = loadLocal(row.rater_id);
+    const idx = rows.findIndex(r => r.fdkey === row.fdkey);
+    if (idx >= 0) rows[idx] = row; else rows.push(row);
+    localStorage.setItem(key, JSON.stringify(rows));
+  } catch(e){ /* private mode / storage blocked — auto-push still works */ }
+}
+
+// ---------- CSV ----------
+function csvEscape(v){
+  if (v == null) v = "";
+  v = String(v);
+  if (/[",\n]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
+  return v;
+}
+function rowsToCsv(rows){
+  const lines = [CSV_COLUMNS.join(",")];
+  rows.forEach(r => lines.push(CSV_COLUMNS.map(c => csvEscape(r[c])).join(",")));
+  return lines.join("\r\n") + "\r\n";
+}
+function parseCsv(text){
+  const rows = []; let i = 0, field = "", row = [], inQuotes = false;
+  const pushField = () => { row.push(field); field = ""; };
+  const pushRow = () => { rows.push(row); row = []; };
+  while (i < text.length){
+    const c = text[i];
+    if (inQuotes){
+      if (c === '"'){ if (text[i+1] === '"'){ field += '"'; i += 2; continue; } inQuotes = false; i++; continue; }
+      field += c; i++; continue;
+    } else {
+      if (c === '"'){ inQuotes = true; i++; continue; }
+      if (c === ','){ pushField(); i++; continue; }
+      if (c === '\r'){ i++; continue; }
+      if (c === '\n'){ pushField(); pushRow(); i++; continue; }
+      field += c; i++; continue;
+    }
+  }
+  if (field.length || row.length){ pushField(); pushRow(); }
+  return rows.filter(r => !(r.length === 1 && r[0] === ""));
+}
+function downloadCsv(raterId){
+  const rows = loadLocal(raterId);
+  if (!rows.length){ return; }
+  const blob = new Blob([rowsToCsv(rows)], {type:"text/csv"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `ratings_${raterId}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---------- GitHub sync ----------
+const GH_API = "https://api.github.com";
+function githubConfigured(){
+  const c = CONFIG.responsesRepo;
+  return !!(c.token && c.owner && c.owner !== "YOUR_GITHUB_USERNAME" && c.repo && c.repo !== "YOUR_RESPONSES_REPO");
+}
+function b64EncodeUtf8(str){ return btoa(unescape(encodeURIComponent(str))); }
+function b64DecodeUtf8(str){ return decodeURIComponent(escape(atob(str))); }
+
+async function ghGetFile(path){
+  const {owner, repo, branch, token} = CONFIG.responsesRepo;
+  const res = await fetch(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("GitHub read failed: " + res.status);
+  const j = await res.json();
+  return { sha: j.sha, content: b64DecodeUtf8((j.content || "").replace(/\n/g, "")) };
+}
+async function ghPutFile(path, content, message, sha){
+  const {owner, repo, branch, token} = CONFIG.responsesRepo;
+  const res = await fetch(`${GH_API}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ message, content: b64EncodeUtf8(content), branch }, sha ? {sha} : {}))
+  });
+  if (!res.ok){
+    const t = await res.text().catch(() => "");
+    throw new Error("GitHub write failed: " + res.status + " " + t);
+  }
+  return res.json();
+}
+async function syncRowToGithub(row){
+  const path = `${CONFIG.responsesRepo.responsesPath}/${row.rater_id}.csv`;
+  const existing = await ghGetFile(path);
+  let dataRows = [];
+  if (existing){
+    const parsed = parseCsv(existing.content);
+    const header = parsed[0] || CSV_COLUMNS;
+    dataRows = parsed.slice(1).map(r => {
+      const obj = {};
+      header.forEach((h, i) => obj[h] = r[i] ?? "");
+      return obj;
+    });
+  }
+  const idx = dataRows.findIndex(r => r.fdkey === row.fdkey);
+  if (idx >= 0) dataRows[idx] = row; else dataRows.push(row);
+  await ghPutFile(path, rowsToCsv(dataRows), `Ratings from ${row.rater} — ${row.fdkey}`, existing ? existing.sha : null);
+}
+async function syncRowToGithubWithRetry(row){
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++){
+    try { await syncRowToGithub(row); return; }
+    catch (e){ lastErr = e; }
+  }
+  throw lastErr;
+}
+async function retrySync(){
+  const raterId = sanitizeId(state.rater);
+  const pending = loadLocal(raterId).filter(r => !r.synced);
+  for (const row of pending){
+    try { await syncRowToGithubWithRetry(row); row.synced = true; saveLocal(row); }
+    catch (e){ break; }
+  }
+  render();
+}
+
+// ---------- state ----------
+const state = {
+  screen: "landing",
+  rater: "",
+  track: null,
+  queue: [],
+  idx: 0,
+  form: {},
+  savedIds: new Set(),
+  saving: false,
+  saveMsg: ""
+};
+
+// ---------- tiny DOM helper ----------
+function el(tag, attrs, ...kids){
+  const n = document.createElement(tag);
+  if (attrs) for (const k in attrs){
+    if (k === "class") n.className = attrs[k];
+    else if (k === "html") n.innerHTML = attrs[k];
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), attrs[k]);
+    else n.setAttribute(k, attrs[k]);
+  }
+  for (const kid of kids){
+    if (kid == null) continue;
+    n.appendChild(typeof kid === "string" ? document.createTextNode(kid) : kid);
+  }
+  return n;
+}
+
+function render(){
+  const app = document.getElementById("app");
+  app.innerHTML = "";
+  if (state.screen === "landing") app.appendChild(renderLanding());
+  else if (state.screen === "rate") app.appendChild(renderRate());
+  else if (state.screen === "done") app.appendChild(renderDone());
+}
+
+function renderLanding(){
+  const nFull = MANIFEST.length;
+  const nSpot = MANIFEST.filter(r => r.track === "spot_check").length;
+
+  const nameInput = el("input", {
+    type:"text", id:"rater-name", placeholder:"e.g. Priya",
+    value: state.rater,
+    oninput: e => { state.rater = e.target.value; updateStartBtn(); }
+  });
+
+  const fullCard = el("button", {
+    class:"track-card" + (state.track === "full" ? " selected" : ""),
+    onclick: () => { state.track = "full"; render(); }
+  }, el("b", null, "Full grading"),
+     el("span", null, `Rate all ${nFull} fruit-days. This is the complete independent relabel.`));
+
+  const spotCard = el("button", {
+    class:"track-card" + (state.track === "spot" ? " selected" : ""),
+    onclick: () => { state.track = "spot"; render(); }
+  }, el("b", null, "Spot-check"),
+     el("span", null, `Rate a shared subset of ${nSpot} fruit-days, the same ones every spot-check rater sees. Used to measure agreement between raters.`));
+
+  const startBtn = el("button", {
+    class:"primary", id:"start-btn", disabled:"disabled", onclick: startSession
+  }, "Start rating");
+
+  const storageNote = githubConfigured()
+    ? "Each rating saves to this device immediately, then syncs automatically to the results repo. You can close this and come back any time."
+    : "Auto-sync isn't set up yet, so ratings are saved on this device only. Use \"Download CSV\" on the finish screen to hand off your file.";
+
+  return el("div", {class:"stack"},
+    el("div", {class:"stack"},
+      el("div", {class:"eyebrow"}, "Fruit quality · independent relabel"),
+      el("h1", null, "Blind Fruit Grader"),
+      el("p", {class:"kicker"},
+        "You'll see photos of a banana or guava on one storage day, with no dates, IDs or existing labels attached. Grade what you see. Your ratings are compared against the original labels to check how consistent they are.")
+    ),
+    el("div", {class:"card stack"},
+      el("label", {class:"eyebrow", for:"rater-name"}, "Your name"),
+      nameInput,
+      el("div", {class:"eyebrow"}, "Which set will you rate?"),
+      el("div", {class:"track-pick"}, fullCard, spotCard),
+      startBtn,
+      el("div", {class:"save-note"}, storageNote)
+    ),
+    renderRubric()
+  );
+}
+
+function renderRubric(){
+  return el("details", {class:"rubric"},
+    el("summary", null, "Grading guide"),
+    el("ul", null,
+      el("li", null, el("b", null,"A — pristine: "), "uniform colour, no wrinkling, no leakage, no mould, no visible marks."),
+      el("li", null, el("b", null,"B — sound: "), "intact skin, natural ripening progression, no damage."),
+      el("li", null, el("b", null,"C — worn: "), "intact but visibly bruised, scarred or discoloured; no wet leakage or mould."),
+      el("li", null, el("b", null,"D — deteriorated: "), "extensive discolouration, dents or soft spots, heavy visible deterioration."),
+      el("li", null, el("b", null,"Spoilage: "), "fresh → mild decline (early soft spots or dulling) → spoiled (clear rot/mould/leakage in places) → severely spoiled (majority of surface affected)."),
+      el("li", null, el("b", null,"Ripeness: "), "judge by skin colour only — green/unripe through fully coloured/soft-ripe, species-specific stages shown per item.")
+    )
+  );
+}
+
+function updateStartBtn(){
+  const btn = document.getElementById("start-btn");
+  if (!btn) return;
+  btn.disabled = !(state.rater.trim().length >= 2 && state.track);
+}
+
+function startSession(){
+  const track = state.track;
+  const list = MANIFEST.filter(r => track === "full" ? true : r.track === "spot_check");
+  state.queue = list.map(r => r.fdkey);
+  state.form = {};
+  state.savedIds = new Set();
+
+  const raterId = sanitizeId(state.rater);
+  loadLocal(raterId).forEach(row => {
+    if (!state.queue.includes(row.fdkey)) return;
+    state.savedIds.add(row.fdkey);
+    const marks = {};
+    try {
+      const parsed = row.inedible_marks ? JSON.parse(row.inedible_marks) : {};
+      Object.keys(parsed).forEach(fn => {
+        marks[fn] = parsed[fn].map(flat => {
+          const pts = [];
+          for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i+1]]);
+          return pts;
+        });
+      });
+    } catch(e){}
+    state.form[row.fdkey] = {
+      grade: row.freshness_grade, spoilage: row.spoilage_level, ripeness: row.ripeness_stage,
+      defects: new Set((row.defect_type || "none").split(",").filter(Boolean)),
+      notes: row.notes, marks
+    };
+  });
+
+  const firstUnanswered = state.queue.findIndex(k => !state.savedIds.has(k));
+  state.idx = firstUnanswered === -1 ? 0 : firstUnanswered;
+  state.screen = "rate";
+  render();
+}
+
+function currentRecord(){
+  const fdkey = state.queue[state.idx];
+  return MANIFEST.find(r => r.fdkey === fdkey);
+}
+
+function renderRate(){
+  const rec = currentRecord();
+  if (!rec){ state.screen = "done"; render(); return el("div"); }
+
+  const f = state.form[rec.fdkey] || (state.form[rec.fdkey] = {defects: new Set(["none"]), marks: {}});
+  const total = state.queue.length;
+  const pct = Math.round((state.idx / total) * 100);
+
+  const gallery = el("div", {class:"gallery"});
+  rec.images.forEach(fname => {
+    const hasMark = f.marks[fname] && f.marks[fname].length > 0;
+    gallery.appendChild(el("div", {
+      class: "thumb" + (hasMark ? " marked" : ""),
+      onclick: () => openLightbox(fname, rec, f)
+    },
+      el("img", {src: CONFIG.imageBaseUrl + fname, alt:"fruit photo"}),
+      hasMark ? el("span", {class:"mark-dot"}) : null
+    ));
+  });
+
+  const gradeChoices = el("div", {class:"choice-grid"});
+  GRADES.forEach(g => {
+    gradeChoices.appendChild(el("button", {
+      type:"button", class:"choice grade-" + g.v + (f.grade === g.v ? " selected" : ""),
+      onclick: () => { f.grade = g.v; render(); }
+    }, el("span", {class:"dot"}), g.label.split(" — ")[0], el("small", null, g.hint)));
+  });
+
+  const spoilChoices = el("div", {class:"choice-grid"});
+  SPOILAGE.forEach(s => {
+    spoilChoices.appendChild(el("button", {
+      type:"button", class:"choice" + (f.spoilage === s.v ? " selected" : ""),
+      onclick: () => { f.spoilage = s.v; render(); }
+    }, s.label));
+  });
+
+  const ripeChoices = el("div", {class:"choice-grid"});
+  RIPENESS[rec.species].forEach(r => {
+    ripeChoices.appendChild(el("button", {
+      type:"button", class:"choice" + (f.ripeness === r ? " selected" : ""),
+      onclick: () => { f.ripeness = r; render(); }
+    }, fmtRipe(r)));
+  });
+
+  const defectGrid = el("div", {class:"defect-grid"});
+  DEFECTS.forEach(d => {
+    const active = f.defects.has(d);
+    defectGrid.appendChild(el("button", {
+      type:"button", class:"choice" + (active ? " selected" : ""),
+      onclick: () => {
+        if (d === "none"){ f.defects = new Set(["none"]); }
+        else {
+          f.defects.delete("none");
+          if (active) f.defects.delete(d); else f.defects.add(d);
+          if (f.defects.size === 0) f.defects.add("none");
+        }
+        render();
+      }
+    }, d));
+  });
+
+  const notes = el("textarea", {
+    placeholder:"Optional notes (anything unusual, uncertain, or worth flagging)",
+    oninput: e => { f.notes = e.target.value; }
+  });
+  notes.value = f.notes || "";
+
+  const ready = f.grade && f.spoilage && f.ripeness;
+  const alreadySaved = state.savedIds.has(rec.fdkey);
+
+  const submitBtn = el("button", {
+    class:"primary", disabled: !ready || state.saving,
+    onclick: () => submitCurrent(rec)
+  }, state.idx === total - 1 ? "Save & finish" : "Save & next");
+
+  const backBtn = el("button", {
+    class:"ghost", disabled: state.idx === 0,
+    onclick: () => { state.idx = Math.max(0, state.idx - 1); render(); }
+  }, "Back");
+
+  const raterId = sanitizeId(state.rater);
+  const pendingCount = loadLocal(raterId).filter(r => !r.synced).length;
+  const syncPill = githubConfigured()
+    ? el("span", {class:"sync-pill " + (pendingCount ? "pending" : "ok")},
+        pendingCount ? `${pendingCount} pending sync` : "synced")
+    : el("span", {class:"sync-pill pending"}, "local only");
+
+  return el("div", {class:"stack"},
+    el("div", {class:"topbar"},
+      el("div", {class:"stack", style:"gap:4px"},
+        el("div", {class:"eyebrow"}, state.track === "full" ? "Full grading" : "Spot-check"),
+        el("div", {class:"progress-bar", style:"width:160px"}, el("div", {class:"progress-fill", style:`width:${pct}%`}))
+      ),
+      el("div", {class:"row", style:"align-items:center; gap:8px"},
+        syncPill,
+        el("div", {class:"fdcode"}, `${state.idx+1} / ${total}` + (alreadySaved ? " · saved" : ""))
+      )
+    ),
+    el("div", {class:"card stack"},
+      el("div", {class:"row", style:"justify-content:space-between; align-items:center"},
+        el("h2", null, fmtSpecies(rec.species)),
+        el("span", {class:"badge"}, "no dates or IDs shown — grade only what you see")
+      ),
+      gallery,
+      el("div", {class:"kicker", style:"font-size:12.5px"}, "Tap a photo to open it full-size and draw over any part you personally wouldn't eat.")
+    ),
+    el("div", {class:"card stack"},
+      el("fieldset", null, el("legend", null, "Freshness grade", el("span",{class:"req"},"*")), gradeChoices),
+      el("div", {class:"divider"}),
+      el("fieldset", null, el("legend", null, "Spoilage level", el("span",{class:"req"},"*")), spoilChoices),
+      el("div", {class:"divider"}),
+      el("fieldset", null, el("legend", null, "Ripeness stage", el("span",{class:"req"},"*")), ripeChoices),
+      el("div", {class:"divider"}),
+      el("fieldset", null, el("legend", null, "Visible defects (optional, pick any)"), defectGrid),
+      el("div", {class:"divider"}),
+      el("fieldset", null, el("legend", null, "Notes"), notes)
+    ),
+    el("div", {class:"row", style:"justify-content:space-between; align-items:center"},
+      backBtn,
+      el("div", {class:"stack", style:"gap:2px; align-items:flex-end"},
+        el("div", {class:"save-note"}, state.saveMsg),
+        submitBtn
+      )
+    )
+  );
+}
+
+async function submitCurrent(rec){
+  const f = state.form[rec.fdkey];
+  state.saving = true;
+  state.saveMsg = "Saving…";
+  render();
+
+  const marksOut = {};
+  Object.keys(f.marks || {}).forEach(fn => {
+    if (f.marks[fn] && f.marks[fn].length) marksOut[fn] = f.marks[fn].map(s => s.flat());
+  });
+
+  const row = {
+    rater: state.rater.trim(),
+    rater_id: sanitizeId(state.rater),
+    track: state.track,
+    fdkey: rec.fdkey,
+    species: rec.species,
+    freshness_grade: f.grade,
+    spoilage_level: f.spoilage,
+    ripeness_stage: f.ripeness,
+    defect_type: Array.from(f.defects).join(","),
+    notes: (f.notes || "").trim(),
+    inedible_marks: Object.keys(marksOut).length ? JSON.stringify(marksOut) : "",
+    submitted_at: new Date().toISOString(),
+    synced: false
+  };
+
+  saveLocal(row);
+
+  let pushed = false;
+  if (githubConfigured()){
+    try { await syncRowToGithubWithRetry(row); pushed = true; row.synced = true; saveLocal(row); }
+    catch (e){ pushed = false; }
+  }
+
+  state.saving = false;
+  state.savedIds.add(rec.fdkey);
+  state.saveMsg = !githubConfigured() ? "Saved on this device."
+    : pushed ? "Saved to GitHub." : "Saved locally — will retry sync.";
+  render();
+
+  if (state.idx < state.queue.length - 1){
+    state.idx += 1;
+    state.saveMsg = "";
+    render();
+  } else {
+    state.screen = "done";
+    render();
+  }
+}
+
+function renderDone(){
+  const raterId = sanitizeId(state.rater);
+  const pendingCount = loadLocal(raterId).filter(r => !r.synced).length;
+  return el("div", {class:"card finish stack"},
+    el("h2", null, "All done"),
+    el("p", {class:"kicker"}, `Thank you, ${state.rater.trim()}. You rated ${state.queue.length} fruit-days on the ${state.track === "full" ? "full" : "spot-check"} track.`),
+    pendingCount
+      ? el("p", {class:"kicker"}, `${pendingCount} rating(s) haven't synced to GitHub yet (offline or the connection dropped). Try "Retry sync" before you close this tab, or keep the downloaded CSV as a backup.`)
+      : (githubConfigured() ? el("p", {class:"kicker"}, "All your ratings are synced to the results repo.") : null),
+    el("div", {class:"row", style:"justify-content:center"},
+      githubConfigured() ? el("button", {class:"ghost", onclick: async () => { await retrySync(); render(); }}, "Retry sync") : null,
+      el("button", {class:"ghost", onclick: () => downloadCsv(raterId)}, "Download CSV"),
+      el("button", {class:"primary", onclick: () => { state.screen = "landing"; state.track = null; render(); }}, "Rate another set")
+    )
+  );
+}
+
+// ---------- lightbox / drawing ----------
+let lbCtx = null, lbFname = null, lbRec = null, lbForm = null, activeStroke = null;
+
+function openLightbox(fname, rec, f){
+  lbFname = fname; lbRec = rec; lbForm = f;
+  const img = document.getElementById("lightbox-img");
+  const canvas = document.getElementById("lightbox-canvas");
+  document.getElementById("lightbox").hidden = false;
+  img.onload = () => setupCanvas(img, canvas);
+  img.src = CONFIG.imageBaseUrl + fname;
+  if (img.complete) setupCanvas(img, canvas);
+}
+function setupCanvas(img, canvas){
+  const w = img.clientWidth, h = img.clientHeight;
+  if (!w || !h) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  lbCtx = canvas.getContext("2d");
+  lbCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  lbCtx.lineCap = "round"; lbCtx.lineJoin = "round";
+  drawAll();
+}
+function drawAll(){
+  const canvas = document.getElementById("lightbox-canvas");
+  if (!lbCtx || !lbFname) return;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  lbCtx.clearRect(0, 0, w, h);
+  lbCtx.strokeStyle = "rgba(214,64,45,0.85)";
+  lbCtx.lineWidth = Math.max(4, w * 0.02);
+  const strokes = (lbForm.marks[lbFname] || []).slice();
+  if (activeStroke) strokes.push(activeStroke);
+  strokes.forEach(stroke => {
+    if (stroke.length < 2) return;
+    lbCtx.beginPath();
+    stroke.forEach((p, i) => {
+      const x = p[0] * w, y = p[1] * h;
+      if (i === 0) lbCtx.moveTo(x, y); else lbCtx.lineTo(x, y);
+    });
+    lbCtx.stroke();
+  });
+}
+function ptToNorm(e, canvas){
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = (e.clientY - rect.top) / rect.height;
+  return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
+}
+function endStroke(){
+  if (!activeStroke) return;
+  if (activeStroke.length >= 2){
+    const arr = lbForm.marks[lbFname] || (lbForm.marks[lbFname] = []);
+    arr.push(activeStroke.map(p => [Math.round(p[0]*1000)/1000, Math.round(p[1]*1000)/1000]));
+  }
+  activeStroke = null;
+  drawAll();
+}
+function closeLightbox(){
+  document.getElementById("lightbox").hidden = true;
+  render();
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const canvas = document.getElementById("lightbox-canvas");
+  canvas.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    activeStroke = [ptToNorm(e, canvas)];
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (!activeStroke) return;
+    activeStroke.push(ptToNorm(e, canvas));
+    drawAll();
+  });
+  canvas.addEventListener("pointerup", endStroke);
+  canvas.addEventListener("pointercancel", endStroke);
+  canvas.addEventListener("pointerleave", () => { if (activeStroke) endStroke(); });
+
+  document.getElementById("lb-undo").addEventListener("click", e => {
+    e.stopPropagation();
+    const arr = lbForm.marks[lbFname];
+    if (arr && arr.length) arr.pop();
+    drawAll();
+  });
+  document.getElementById("lb-clear").addEventListener("click", e => {
+    e.stopPropagation();
+    if (lbFname) lbForm.marks[lbFname] = [];
+    drawAll();
+  });
+  document.getElementById("lb-done").addEventListener("click", e => {
+    e.stopPropagation();
+    closeLightbox();
+  });
+  document.querySelector(".lightbox-panel").addEventListener("click", e => e.stopPropagation());
+  document.getElementById("lightbox").addEventListener("click", closeLightbox);
+  window.addEventListener("resize", () => {
+    if (!document.getElementById("lightbox").hidden){
+      setupCanvas(document.getElementById("lightbox-img"), document.getElementById("lightbox-canvas"));
+    }
+  });
+
+  render();
+});
+</script>
+</body>
+</html>

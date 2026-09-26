@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Blind Fruit Grader</title>
+<title>Fruit Grader</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   :root{
@@ -210,7 +210,7 @@ const CONFIG = {
     </div>
     <div class="stack">
       <div class="eyebrow">Fruit quality &middot; independent relabel</div>
-      <h1>Blind Fruit Grader</h1>
+      <h1>Fruit Grader</h1>
       <p class="kicker">You'll see photos of a banana or guava on one storage day, with no dates, IDs or existing labels attached. Grade what you see. Your ratings are compared against the original labels to check how consistent they are.</p>
     </div>
     <div class="card stack">
@@ -220,11 +220,11 @@ const CONFIG = {
       <div class="track-pick">
         <button type="button" class="track-card" :class="{selected: track==='full'}" @click="track='full'">
           <b>Full grading</b>
-          <span>Rate all {{ nFull }} fruit-days. This is the complete independent relabel.</span>
+          <span>Rate all {{ nFull }} fruit-days.</span>
         </button>
         <button type="button" class="track-card" :class="{selected: track==='spot'}" @click="track='spot'">
           <b>Spot-check</b>
-          <span>Rate {{ SPOT_INITIAL }} fruit-days from a shared set the same ones every spot-check rater sees, used to measure agreement between raters. You can optionally add more afterward.</span>
+          <span>Rate only 15 fruits for us. You can optionally add more afterward.</span>
         </button>
       </div>
       <button class="primary" :disabled="!canStart || startingSession" @click="startSession">{{ startingSession ? "Starting…" : "Start rating" }}</button>

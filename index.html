@@ -106,7 +106,7 @@
     border:1.5px solid var(--line); border-radius:10px; padding:9px 13px;
     background:var(--surface); font-size:14px; cursor:pointer; color:var(--ink);
   }
-  .choice.selected{border-color:var(--accent); background:var(--accent-soft); font-weight:600;}
+  .choice.selected{border-color:var(--accent); background:var(--accent-soft); box-shadow:inset 0 0 0 1px var(--accent);}
   .choice small{display:block; font-weight:400; color:var(--ink-soft); font-size:11px; margin-top:2px;}
 
   .grade-A{--dot:#3f8c5b;} .grade-B{--dot:#7fae3f;} .grade-C{--dot:#c98f2b;} .grade-D{--dot:#b1502c;}
@@ -387,7 +387,8 @@ const state = {
   form: {},
   savedIds: new Set(),
   saving: false,
-  saveMsg: ""
+  saveMsg: "",
+  exitMsg: ""
 };
 
 // ---------- tiny DOM helper ----------
@@ -438,7 +439,7 @@ function renderLanding(){
   const nameInput = el("input", {
     type:"text", id:"rater-name", placeholder:"e.g. Priya",
     value: state.rater,
-    oninput: e => { state.rater = e.target.value; updateStartBtn(); }
+    oninput: e => { state.rater = e.target.value; state.exitMsg = ""; updateStartBtn(); }
   });
 
   const fullCard = el("button", {
@@ -461,7 +462,11 @@ function renderLanding(){
     ? "Each rating saves to this device immediately, then syncs automatically to the results repo. You can close this and come back any time."
     : "Auto-sync isn't set up yet, so ratings are saved on this device only. Use \"Download CSV\" on the finish screen to hand off your file.";
 
+  const exitNote = state.exitMsg ? el("div", {class:"card", style:"padding:12px 14px;"},
+    el("div", {class:"save-note", style:"font-size:13px;"}, state.exitMsg)) : null;
+
   return el("div", {class:"stack"},
+    exitNote,
     el("div", {class:"stack"},
       el("div", {class:"eyebrow"}, "Fruit quality · independent relabel"),
       el("h1", null, "Blind Fruit Grader"),
@@ -506,6 +511,7 @@ function startSession(){
   state.queue = list.map(r => r.fdkey);
   state.form = {};
   state.savedIds = new Set();
+  state.exitMsg = "";
 
   const raterId = sanitizeId(state.rater);
   loadLocal(raterId).forEach(row => {
@@ -615,6 +621,11 @@ function renderRate(){
     onclick: () => submitCurrent(rec)
   }, state.idx === total - 1 ? "Save & finish" : "Save & next");
 
+  const saveExitBtn = el("button", {
+    class:"ghost", disabled: !ready || state.saving,
+    onclick: () => saveAndExit(rec)
+  }, "Save & continue later");
+
   const backBtn = el("button", {
     class:"ghost", disabled: state.idx === 0,
     onclick: () => { state.idx = Math.max(0, state.idx - 1); render(); }
@@ -659,20 +670,19 @@ function renderRate(){
     ),
     el("div", {class:"row", style:"justify-content:space-between; align-items:center"},
       backBtn,
-      el("div", {class:"stack", style:"gap:2px; align-items:flex-end"},
-        el("div", {class:"save-note"}, state.saveMsg),
-        submitBtn
+      el("div", {class:"row", style:"gap:8px; align-items:center"},
+        saveExitBtn,
+        el("div", {class:"stack", style:"gap:2px; align-items:flex-end"},
+          el("div", {class:"save-note"}, state.saveMsg),
+          submitBtn
+        )
       )
     )
   );
 }
 
-async function submitCurrent(rec){
+async function saveRow(rec){
   const f = state.form[rec.fdkey];
-  state.saving = true;
-  state.saveMsg = "Saving…";
-  render();
-
   const marksOut = {};
   Object.keys(f.marks || {}).forEach(fn => {
     if (f.marks[fn] && f.marks[fn].length) marksOut[fn] = f.marks[fn].map(s => s.flat());
@@ -702,8 +712,18 @@ async function submitCurrent(rec){
     catch (e){ pushed = false; }
   }
 
-  state.saving = false;
   state.savedIds.add(rec.fdkey);
+  return pushed;
+}
+
+async function submitCurrent(rec){
+  state.saving = true;
+  state.saveMsg = "Saving…";
+  render();
+
+  const pushed = await saveRow(rec);
+
+  state.saving = false;
   state.saveMsg = !githubConfigured() ? "Saved on this device."
     : pushed ? "Saved to GitHub." : "Saved locally — will retry sync.";
   render();
@@ -718,6 +738,26 @@ async function submitCurrent(rec){
   }
 }
 
+// Saves the current answer, same as "Save & next", but stops here instead
+// of advancing — the rater can close the tab or come back to the landing
+// screen and resume later without being forced through the rest of the set.
+async function saveAndExit(rec){
+  state.saving = true;
+  state.saveMsg = "Saving…";
+  render();
+
+  const pushed = await saveRow(rec);
+
+  state.saving = false;
+  state.saveMsg = "";
+  state.exitMsg = !githubConfigured() ? "Progress saved on this device — pick the same name and set to pick up where you left off."
+    : pushed ? "Progress saved to GitHub — pick the same name and set to pick up where you left off."
+    : "Progress saved locally — will retry sync. Pick the same name and set to pick up where you left off.";
+  state.screen = "landing";
+  state.track = null;
+  render();
+}
+
 function renderDone(){
   const raterId = sanitizeId(state.rater);
   const pendingCount = loadLocal(raterId).filter(r => !r.synced).length;
@@ -730,7 +770,7 @@ function renderDone(){
     el("div", {class:"row", style:"justify-content:center"},
       githubConfigured() ? el("button", {class:"ghost", onclick: async () => { await retrySync(); render(); }}, "Retry sync") : null,
       el("button", {class:"ghost", onclick: () => downloadCsv(raterId)}, "Download CSV"),
-      el("button", {class:"primary", onclick: () => { state.screen = "landing"; state.track = null; render(); }}, "Rate another set")
+      el("button", {class:"primary", onclick: () => { state.screen = "landing"; state.track = null; state.exitMsg = ""; render(); }}, "Rate another set")
     )
   );
 }

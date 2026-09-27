@@ -400,12 +400,15 @@ const CSV_COLUMNS = [
 const SPOT_INITIAL = 15;
 const SPOT_EXTRA = 5;
 // At/after this instant, spot-check assignment switches from a fixed
-// shared subset to coverage-aware picking: only fruit-days with zero
-// ratings so far ("not annotated") are assigned — anything that already
-// has at least one reading is skipped entirely. Before this instant,
-// nothing changes — behavior is identical to before.
+// shared subset to coverage-aware picking: fruit-days with 0 ratings
+// ("not annotated") go first, then ones with exactly 1 (a second,
+// independent check), and anything already at SPOT_READING_CAP is
+// excluded entirely — no fruit-day is ever assigned to more than that
+// many raters. Before this instant, nothing changes — behavior is
+// identical to before.
 // 3:00 PM IST on 27 Sep 2026 = 09:30 UTC (IST is UTC+5:30).
 const SPOT_COVERAGE_DEADLINE = Date.parse("2026-09-27T09:30:00Z");
+const SPOT_READING_CAP = 2;
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function fmtRipe(r){ return r.replace(/^\d+-/, "").replace(/_/g, " "); }
@@ -659,14 +662,23 @@ const App = {
       });
     },
 
-    // Returns only fdkeys with zero ratings so far ("not annotated") —
-    // anything that already has at least one reading is skipped entirely,
-    // since the goal is filling coverage gaps, not double-checking items
-    // that already have data. Shuffled so raters don't all see them in the
-    // same order.
+    // Ranks fdkeys by current reading count: completely unrated ("not
+    // annotated") ones first, then ones with exactly 1 reading (still
+    // useful as a second, independent check). Anything already at
+    // SPOT_READING_CAP or more is excluded entirely — once 2 people have
+    // rated a fruit-day, no one else is asked to. Ties are shuffled so
+    // raters don't all see them in the same order.
     rankByCoverage(fdkeys, coverage){
-      const unrated = fdkeys.filter(k => !coverage[k]);
-      return shuffle(unrated);
+      const byCount = {};
+      fdkeys.forEach(k => {
+        const c = coverage[k] || 0;
+        if (c >= SPOT_READING_CAP) return;
+        (byCount[c] = byCount[c] || []).push(k);
+      });
+      const counts = Object.keys(byCount).map(Number).sort((a, b) => a - b);
+      let ranked = [];
+      counts.forEach(c => { ranked = ranked.concat(shuffle(byCount[c])); });
+      return ranked;
     },
 
     async startSession(){

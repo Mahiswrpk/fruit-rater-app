@@ -407,6 +407,16 @@ const SPOT_EXTRA = 5;
 // already at SPOT_READING_CAP is excluded entirely — no fruit-day is
 // ever assigned to more than that many raters.
 const SPOT_READING_CAP = 2;
+// Fruit-days a test/demo account rated before real raters started using the
+// app. Their rows sit in the Sheet alongside real ones, so these items'
+// coverage counts are somewhat inflated by non-real data. Route the next
+// real raters to these first, ahead of normal coverage ranking and even
+// past SPOT_READING_CAP, so each gets an extra independent real rating.
+const PRIORITY_FDKEYS = [
+  "BANANA1_D2","BANANA1_D5","BANANA1_D6","BANANA1_D7","BANANA2_D2",
+  "BANANA3_D2","BANANA3_D5","BANANA4_D2","BANANA4_D5",
+  "GUAVA1_D2","GUAVA1_D5","GUAVA1_D6"
+];
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function fmtRipe(r){ return r.replace(/^\d+-/, "").replace(/_/g, " "); }
@@ -700,8 +710,15 @@ const App = {
         if (coverage){
           this.coverageMode = true;
           const ranked = this.rankByCoverage(this.spotPool, coverage);
-          this.queue = ranked.slice(0, SPOT_INITIAL);
-          this.coverageCandidates = ranked.slice(SPOT_INITIAL);
+          // Priority items go first regardless of their coverage count
+          // (even past SPOT_READING_CAP) since their existing coverage
+          // includes non-real test rows; everything else follows in the
+          // usual lowest-coverage-first order.
+          const priority = shuffle(PRIORITY_FDKEYS.filter(k => this.spotPool.includes(k)));
+          const rest = ranked.filter(k => !priority.includes(k));
+          const ordered = priority.concat(rest);
+          this.queue = ordered.slice(0, SPOT_INITIAL);
+          this.coverageCandidates = ordered.slice(SPOT_INITIAL);
         } else {
           this.coverageMode = false;
           this.queue = shuffle(this.spotPool.slice(0, SPOT_INITIAL));

@@ -407,16 +407,35 @@ const SPOT_EXTRA = 5;
 // already at SPOT_READING_CAP is excluded entirely — no fruit-day is
 // ever assigned to more than that many raters.
 const SPOT_READING_CAP = 2;
-// Fruit-days a test/demo account rated before real raters started using the
-// app. Their rows sit in the Sheet alongside real ones, so these items'
-// coverage counts are somewhat inflated by non-real data. Route the next
-// real raters to these first, ahead of normal coverage ranking and even
-// past SPOT_READING_CAP, so each gets an extra independent real rating.
-const PRIORITY_FDKEYS = [
-  "BANANA1_D2","BANANA1_D5","BANANA1_D6","BANANA1_D7","BANANA2_D2",
-  "BANANA3_D2","BANANA3_D5","BANANA4_D2","BANANA4_D5",
-  "GUAVA1_D2","GUAVA1_D5","GUAVA1_D6"
+
+// The fixed set of fruit-days shown on the Spot-check track, in this exact
+// order — same list, same order, for every spot-check rater. Never-rated
+// ones come first so they get covered even if a rater stops early; ones
+// with exactly one reading so far come next. This replaces the old
+// `record.track === "spot_check"` filter as the source of the spot-check
+// queue — track is still read off MANIFEST for the Full track and for each
+// record's own data, just not to decide spot-check membership anymore.
+const SPOT_CHECK_KEYS = [
+  // 1) never rated yet (highest priority)
+  "BANANA1_D3", "BANANA2_D5", "BANANA2_D6", "BANANA4_D6", "GUAVA2_D6", "GUAVA2_D9", "GUAVA2_D10", "GUAVA2_D14",
+  "GUAVA3_D2", "GUAVA3_D5", "GUAVA3_D10", "GUAVA3_D12", "GUAVA3_D13", "GUAVA4_D2", "GUAVA4_D12", "GUAVA4_D14",
+  // 2) only one rating so far
+  "BANANA2_D3", "BANANA2_D7", "BANANA3_D3", "BANANA3_D6", "BANANA3_D7", "BANANA4_D3", "BANANA4_D7", "GUAVA1_D3",
+  "GUAVA1_D9", "GUAVA1_D14", "GUAVA2_D5", "GUAVA2_D13", "GUAVA3_D6", "GUAVA3_D7", "GUAVA4_D3", "GUAVA4_D7"
 ];
+
+// Fail loudly at load time rather than silently mis-assigning raters if
+// SPOT_CHECK_KEYS ever drifts from MANIFEST (a typo'd fdkey, an accidental
+// repeat, etc.).
+(function validateSpotCheckKeys(){
+  const manifestKeys = new Set(MANIFEST.map(r => r.fdkey));
+  const seen = new Set();
+  SPOT_CHECK_KEYS.forEach(k => {
+    if (!manifestKeys.has(k)) throw new Error("SPOT_CHECK_KEYS: \"" + k + "\" is not a fdkey in MANIFEST");
+    if (seen.has(k)) throw new Error("SPOT_CHECK_KEYS: duplicate fdkey \"" + k + "\"");
+    seen.add(k);
+  });
+})();
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function fmtRipe(r){ return r.replace(/^\d+-/, "").replace(/_/g, " "); }
@@ -698,31 +717,13 @@ const App = {
         this.queue = shuffle(MANIFEST.map(r => r.fdkey));
         this.coverageMode = false;
       } else {
-        this.spotPool = MANIFEST.filter(r => r.track === "spot_check").map(r => r.fdkey);
-
-        // Always try coverage-aware assignment first: pulls live counts
-        // from the Sheet so unrated/under-rated fruit-days are prioritized
-        // instead of everyone getting the same fixed subset. Falls back to
-        // the old fixed-shuffled-subset behavior only if the read fails
-        // (e.g. sync not configured, network error).
-        const coverage = await fetchCoverage();
-
-        if (coverage){
-          this.coverageMode = true;
-          const ranked = this.rankByCoverage(this.spotPool, coverage);
-          // Priority items go first regardless of their coverage count
-          // (even past SPOT_READING_CAP) since their existing coverage
-          // includes non-real test rows; everything else follows in the
-          // usual lowest-coverage-first order.
-          const priority = shuffle(PRIORITY_FDKEYS.filter(k => this.spotPool.includes(k)));
-          const rest = ranked.filter(k => !priority.includes(k));
-          const ordered = priority.concat(rest);
-          this.queue = ordered.slice(0, SPOT_INITIAL);
-          this.coverageCandidates = ordered.slice(SPOT_INITIAL);
-        } else {
-          this.coverageMode = false;
-          this.queue = shuffle(this.spotPool.slice(0, SPOT_INITIAL));
-        }
+        // Same fixed list, same fixed order, for every spot-check rater —
+        // see SPOT_CHECK_KEYS above. No live coverage fetch and no
+        // shuffling: never-rated fruit-days must stay first so they're
+        // covered even if a rater stops early.
+        this.spotPool = SPOT_CHECK_KEYS.slice();
+        this.coverageMode = false;
+        this.queue = this.spotPool.slice(0, SPOT_INITIAL);
       }
       this.form = {};
       this.savedIds = new Set();
@@ -747,14 +748,10 @@ const App = {
     },
 
     acceptSpotOffer(){
-      let extra;
-      if (this.coverageMode){
-        extra = this.coverageCandidates.slice(0, SPOT_EXTRA);
-        this.coverageCandidates = this.coverageCandidates.slice(SPOT_EXTRA);
-      } else {
-        const remaining = this.spotPool.filter(fdkey => !this.queue.includes(fdkey));
-        extra = shuffle(remaining.slice(0, SPOT_EXTRA));
-      }
+      // Same fixed order as the initial queue — next up in SPOT_CHECK_KEYS,
+      // not shuffled.
+      const remaining = this.spotPool.filter(fdkey => !this.queue.includes(fdkey));
+      const extra = remaining.slice(0, SPOT_EXTRA);
       if (!extra.length){ this.screen = "done"; return; }
       const startIdx = this.queue.length;
       this.queue = this.queue.concat(extra);

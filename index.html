@@ -399,15 +399,13 @@ const CSV_COLUMNS = [
 // set, then get offered more in increments once they finish one.
 const SPOT_INITIAL = 15;
 const SPOT_EXTRA = 5;
-// At/after this instant, spot-check assignment switches from a fixed
-// shared subset to coverage-aware picking: fruit-days with 0 ratings
-// ("not annotated") go first, then ones with exactly 1 (a second,
-// independent check), and anything already at SPOT_READING_CAP is
-// excluded entirely — no fruit-day is ever assigned to more than that
-// many raters. Before this instant, nothing changes — behavior is
-// identical to before.
-// 3:00 PM IST on 27 Sep 2026 = 09:30 UTC (IST is UTC+5:30).
-const SPOT_COVERAGE_DEADLINE = Date.parse("2026-09-27T09:30:00Z");
+// Spot-check assignment is always coverage-aware (no deadline gating —
+// a prior version wagered readings on the wall clock, which meant every
+// rater kept getting the same already-covered items until the deadline
+// passed): fruit-days with 0 ratings ("not annotated") go first, then
+// ones with exactly 1 (a second, independent check), and anything
+// already at SPOT_READING_CAP is excluded entirely — no fruit-day is
+// ever assigned to more than that many raters.
 const SPOT_READING_CAP = 2;
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
@@ -692,12 +690,12 @@ const App = {
       } else {
         this.spotPool = MANIFEST.filter(r => r.track === "spot_check").map(r => r.fdkey);
 
-        // Before the deadline: unchanged behavior — a fixed shared subset,
-        // shuffled for display order only. At/after it: coverage-aware
-        // assignment, pulling live counts from the Sheet so only fruit-days
-        // with zero ratings so far are handed out. Falls back to the old
-        // behavior if the read fails for any reason.
-        const coverage = (Date.now() >= SPOT_COVERAGE_DEADLINE) ? await fetchCoverage() : null;
+        // Always try coverage-aware assignment first: pulls live counts
+        // from the Sheet so unrated/under-rated fruit-days are prioritized
+        // instead of everyone getting the same fixed subset. Falls back to
+        // the old fixed-shuffled-subset behavior only if the read fails
+        // (e.g. sync not configured, network error).
+        const coverage = await fetchCoverage();
 
         if (coverage){
           this.coverageMode = true;

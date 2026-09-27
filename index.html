@@ -224,8 +224,16 @@ const CONFIG = {
         </button>
         <button type="button" class="track-card" :class="{selected: track==='spot'}" @click="track='spot'">
           <b>Spot-check</b>
-          <span>Rate {{ SPOT_INITIAL }} fruit-days from a shared set the same ones every spot-check rater sees, used to measure agreement between raters. You can optionally add more afterward.</span>
+          <span>Rate one of 3 fixed batches ({{ nSpotCheck }} fruit-days split across them) that still need a first or second independent rating.</span>
         </button>
+      </div>
+      <div class="stack" v-if="track==='spot'">
+        <div class="eyebrow">Which batch were you assigned?</div>
+        <div class="row">
+          <button type="button" class="choice" v-for="(b, i) in BATCHES" :key="i" :class="{selected: batch===i}" @click="batch=i">
+            Batch {{ i+1 }} <small>{{ b.length }} fruit-days</small>
+          </button>
+        </div>
       </div>
       <button class="primary" :disabled="!canStart || startingSession" @click="startSession">{{ startingSession ? "Starting…" : "Start rating" }}</button>
       <div class="save-note">{{ storageNote }}</div>
@@ -424,9 +432,16 @@ const SPOT_CHECK_KEYS = [
   "GUAVA1_D9", "GUAVA1_D14", "GUAVA2_D5", "GUAVA2_D13", "GUAVA3_D6", "GUAVA3_D7", "GUAVA4_D3", "GUAVA4_D7"
 ];
 
+// SPOT_CHECK_KEYS split 3 ways for 3 specific raters, so each covers a
+// distinct slice instead of everyone seeing all 32. Split by index % 3
+// (round-robin) rather than in contiguous chunks, so each batch gets a
+// mix of never-rated and one-rating items instead of one batch getting
+// all of one kind.
+const BATCHES = [0, 1, 2].map(rem => SPOT_CHECK_KEYS.filter((_, i) => i % 3 === rem));
+
 // Fail loudly at load time rather than silently mis-assigning raters if
 // SPOT_CHECK_KEYS ever drifts from MANIFEST (a typo'd fdkey, an accidental
-// repeat, etc.).
+// repeat, etc.), or if BATCHES ever drifts from SPOT_CHECK_KEYS.
 (function validateSpotCheckKeys(){
   const manifestKeys = new Set(MANIFEST.map(r => r.fdkey));
   const seen = new Set();
@@ -435,6 +450,10 @@ const SPOT_CHECK_KEYS = [
     if (seen.has(k)) throw new Error("SPOT_CHECK_KEYS: duplicate fdkey \"" + k + "\"");
     seen.add(k);
   });
+  const batchKeys = BATCHES.flat();
+  if (batchKeys.length !== SPOT_CHECK_KEYS.length || new Set(batchKeys).size !== SPOT_CHECK_KEYS.length){
+    throw new Error("BATCHES: does not partition SPOT_CHECK_KEYS exactly");
+  }
 })();
 
 function fmtSpecies(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
@@ -564,6 +583,7 @@ const App = {
       screen: "landing",
       rater: "",
       track: null,
+      batch: null,
       queue: [],
       idx: 0,
       form: {},
@@ -584,12 +604,17 @@ const App = {
       lbCtx: null,
       imgRetries: {},
       imgFailed: {},
-      GRADES, SPOILAGE, DEFECTS, SPOT_INITIAL, SPOT_EXTRA
+      GRADES, SPOILAGE, DEFECTS, SPOT_INITIAL, SPOT_EXTRA, BATCHES
     };
   },
   computed: {
     nFull(){ return MANIFEST.length; },
-    canStart(){ return this.rater.trim().length >= 2 && !!this.track; },
+    nSpotCheck(){ return SPOT_CHECK_KEYS.length; },
+    canStart(){
+      const nameOk = this.rater.trim().length >= 2;
+      if (this.track === "spot") return nameOk && this.batch !== null;
+      return nameOk && !!this.track;
+    },
     syncConfigured(){ return sheetsConfigured(); },
     storageNote(){
       return this.syncConfigured
@@ -717,13 +742,14 @@ const App = {
         this.queue = shuffle(MANIFEST.map(r => r.fdkey));
         this.coverageMode = false;
       } else {
-        // Same fixed list, same fixed order, for every spot-check rater —
-        // see SPOT_CHECK_KEYS above. No live coverage fetch and no
-        // shuffling: never-rated fruit-days must stay first so they're
-        // covered even if a rater stops early.
-        this.spotPool = SPOT_CHECK_KEYS.slice();
+        // The rater's assigned batch (one of 3 fixed slices of
+        // SPOT_CHECK_KEYS — see BATCHES above), in full and in its fixed
+        // order. No live coverage fetch and no shuffling: each batch is
+        // already sized to be finished in one sitting, and never-rated
+        // fruit-days stay ahead of one-rating ones within it.
+        this.spotPool = BATCHES[this.batch].slice();
         this.coverageMode = false;
-        this.queue = this.spotPool.slice(0, SPOT_INITIAL);
+        this.queue = this.spotPool.slice();
       }
       this.form = {};
       this.savedIds = new Set();
@@ -809,7 +835,7 @@ const App = {
       this.exitMsg = !this.syncConfigured ? "Progress saved on this device — pick the same name and set to pick up where you left off."
         : pushed ? "Progress saved to the Sheet — pick the same name and set to pick up where you left off."
         : "Progress saved locally — will retry sync. Pick the same name and set to pick up where you left off.";
-      this.screen = "landing"; this.track = null;
+      this.screen = "landing"; this.track = null; this.batch = null;
     },
     async retrySyncAll(){
       const pending = loadLocal(this.raterId).filter(r => !r.synced);
@@ -819,7 +845,7 @@ const App = {
       }
     },
     downloadCsvNow(){ downloadCsv(this.raterId); },
-    rateAnother(){ this.screen = "landing"; this.track = null; this.exitMsg = ""; },
+    rateAnother(){ this.screen = "landing"; this.track = null; this.batch = null; this.exitMsg = ""; },
 
     // ---------- lightbox / drawing ----------
     openLightbox(fname){
